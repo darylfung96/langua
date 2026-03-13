@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from youtube_transcript_api import YouTubeTranscriptApi
 from typing import List
 
-from security import get_api_key
+from security import get_current_user
 from utils import extract_video_id
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ youtube_transcript_api = YouTubeTranscriptApi()
 async def get_youtube_transcript(
     url: str, 
     languages: List[str] = ["fr", "ja", "zh-TW", "zh-CN", "ko", "en"],
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_current_user)
 ):
     """Fetch transcript from a YouTube video."""
     video_id = extract_video_id(url)

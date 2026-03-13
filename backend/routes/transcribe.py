@@ -3,14 +3,16 @@ import uuid
 import shutil
 import asyncio
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+import tempfile
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from faster_whisper import WhisperModel
 import torch
 
-from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE
-from security import get_api_key
+from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE, TEMP_DIR
+from security import get_current_user
+from limiter import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["transcription"])
@@ -29,13 +31,14 @@ SUPPORTED_FORMATS = (".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".mkv", ".
 
 
 @router.post("/transcribe")
+@limiter.limit("10/minute")
 async def transcribe(
-    file: UploadFile = File(...), 
+    request: Request,
+    file: UploadFile = File(...),
     language: str = None,
-    api_key: str = Depends(get_api_key)
+    api_key: str = Depends(get_current_user)
 ):
     """Transcribe audio/video file using Whisper."""
-    # Check file size early
     if file.size and file.size > WHISPER_MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Maximum size is 50MB.")
 
@@ -45,28 +48,30 @@ async def transcribe(
     if not file.filename.lower().endswith(SUPPORTED_FORMATS):
         raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported: {', '.join(SUPPORTED_FORMATS)}")
 
-    # Use a unique temp path with sanitized filename
-    safe_filename = os.path.basename(file.filename)
-    temp_path = f"/tmp/{uuid.uuid4()}_{safe_filename}"
-    
+    tmp_file = tempfile.NamedTemporaryFile(
+        dir=TEMP_DIR,
+        suffix=os.path.splitext(file.filename)[1] or ".tmp",
+        delete=False,
+    )
+    temp_path = tmp_file.name
+    tmp_file.close()
+
     try:
-        # Save file asynchronously
         async with asyncio.Lock():
             with open(temp_path, "wb") as buffer:
                 await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
-        # Transcribe using faster-whisper (runs in threadpool to avoid blocking)
         segments, info = await run_in_threadpool(
-            model.transcribe, 
-            temp_path, 
-            beam_size=5, 
+            model.transcribe,
+            temp_path,
+            beam_size=5,
             language=language if language else None,
             word_timestamps=True
         )
-        
+
         all_segments = []
         all_text_parts = []
-        
+
         for segment in segments:
             all_segments.append({
                 "id": len(all_segments),
@@ -75,9 +80,9 @@ async def transcribe(
                 "text": segment.text.strip()
             })
             all_text_parts.append(segment.text.strip())
-            
+
         full_text = " ".join(all_text_parts)
-            
+
         return JSONResponse(content={
             "filename": file.filename,
             "text": full_text,
@@ -90,6 +95,5 @@ async def transcribe(
         logger.error(f"Error during transcription: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
     finally:
-        # Cleanup temp file
         if os.path.exists(temp_path):
             await run_in_threadpool(os.remove, temp_path)

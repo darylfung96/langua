@@ -2,30 +2,24 @@
 Gemini AI story and audio generation endpoints.
 Handles story generation and TTS audio — keeps the API key server-side.
 """
+import asyncio
 import json
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from gemini_webapi import GeminiClient
+from pydantic import BaseModel, Field
+from typing import Optional
 
-from security import get_api_key
-from config import GEMINI_COOKIE_1PSID, GEMINI_COOKIE_1PSIDTS
+from security import get_current_user
+from gemini_client import gemini_client
+from limiter import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["story-generation"])
 
-# Initialize Gemini client
-gemini_client = None
-
-if GEMINI_COOKIE_1PSID:
-    try:
-        gemini_client = GeminiClient(GEMINI_COOKIE_1PSID, GEMINI_COOKIE_1PSIDTS, proxy=None)
-        logger.info("Gemini client created for story generation (will be initialized on first use)")
-    except Exception as e:
-        logger.warning(f"Failed to create Gemini client: {e}")
+_AI_TIMEOUT = 60.0  # seconds
 
 
 def _sanitize_json_text(text: str) -> str:
@@ -53,38 +47,40 @@ def _get_gemini_client():
 
 
 class StoryGenRequest(BaseModel):
-    language: str
-    words: str
+    language: str = Field(min_length=1, max_length=100)
+    words: str = Field(min_length=1, max_length=2_000)
 
 
 class AudioGenRequest(BaseModel):
-    language: str
-    title: str
-    story: str
+    language: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=500)
+    story: str = Field(min_length=1, max_length=50_000)
 
 
 class QuizGenRequest(BaseModel):
-    language: str
-    story: str
+    language: str = Field(min_length=1, max_length=100)
+    story: str = Field(min_length=1, max_length=50_000)
     vocabulary: list
 
 
 @router.post("/generate-quiz")
+@limiter.limit("10/minute")
 async def generate_quiz(
-    request: QuizGenRequest,
-    api_key: str = Depends(get_api_key)
+    request: Request,
+    body: QuizGenRequest,
+    api_key: str = Depends(get_current_user)
 ):
     """Generate a vocabulary quiz based on a story using Gemini AI."""
     client = _get_gemini_client()
 
-    clean_story = re.sub(r"<[^>]+>", "", request.story)
+    clean_story = re.sub(r"<[^>]+>", "", body.story)
     vocab_list = ", ".join(
         f"{v.get('word', '')} = {v.get('equivalent_in_english', '')}"
-        for v in request.vocabulary
+        for v in body.vocabulary
     )
 
     prompt = (
-        f"You are a fun and engaging language quiz creator. Based on this {request.language} "
+        f"You are a fun and engaging language quiz creator. Based on this {body.language} "
         "vocabulary words, create an interactive quiz to help the learner remember the words.\n\n"
         f"Vocabulary words: {vocab_list}\n\n"
         "Create 3 questions per vocabulary word with VARIED types to keep it exciting:\n"
@@ -102,7 +98,7 @@ async def generate_quiz(
         '    {\n'
         '      "id": 1,\n'
         '      "type": "multiple_choice",\n'
-        f'      "question": "The question in the {request.language} language",\n'
+        f'      "question": "The question in the {body.language} language",\n'
         '      "options": ["gato", "perro", "pájaro", "pez"],\n'
         '      "correct_answer": "gato",\n'
         '      "explanation": "Gato = cat! Think of a cat saying GA-TO when it meows.",\n'
@@ -114,7 +110,9 @@ async def generate_quiz(
 
     try:
         await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
-        response = await client.generate_content(prompt)
+        response = await asyncio.wait_for(
+            client.generate_content(prompt), timeout=_AI_TIMEOUT
+        )
 
         if not response.text:
             raise HTTPException(status_code=500, detail="No quiz generated.")
@@ -125,33 +123,38 @@ async def generate_quiz(
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Gemini quiz response as JSON: {e}")
         raise HTTPException(status_code=500, detail="AI returned an invalid response format.")
+    except asyncio.TimeoutError:
+        logger.error("Gemini quiz generation timed out")
+        raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating quiz: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate quiz: {str(e)}")
+        logger.error(f"Error generating quiz: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate quiz.")
 
 
 @router.post("/generate-story")
+@limiter.limit("10/minute")
 async def generate_story(
-    request: StoryGenRequest,
-    api_key: str = Depends(get_api_key)
+    request: Request,
+    body: StoryGenRequest,
+    api_key: str = Depends(get_current_user)
 ):
     """Generate a vocabulary story using Gemini AI."""
     client = _get_gemini_client()
 
     prompt = (
-        f"Write an engaging story in {request.language} that incorporates the following "
-        f"vocabulary words: {request.words}.\n where each targeted vocabulary word will "
+        f"Write an engaging story in {body.language} that incorporates the following "
+        f"vocabulary words: {body.words}.\n where each targeted vocabulary word will "
         "be wrapped in <span class='highlight' title='English Translation'>word</span> \n"
         "Return the result as a raw JSON object with this exact structure:\n"
         "{\n"
-        f'  "title": "Story Title in {request.language}",\n'
-        f'  "story": "The story in {request.language}, with the requested vocabulary words",\n'
+        f'  "title": "Story Title in {body.language}",\n'
+        f'  "story": "The story in {body.language}, with the requested vocabulary words",\n'
         '  "vocabulary": [\n'
         '    {\n'
         '      "word": "The original word submitted by the user",\n'
-        f'      "meaning_in_target": "The meaning of the word in {request.language}",\n'
+        f'      "meaning_in_target": "The meaning of the word in {body.language}",\n'
         '      "equivalent_in_english": "The equivalent word in English"\n'
         '    }\n'
         '  ]\n'
@@ -161,7 +164,9 @@ async def generate_story(
 
     try:
         await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
-        response = await client.generate_content(prompt)
+        response = await asyncio.wait_for(
+            client.generate_content(prompt), timeout=_AI_TIMEOUT
+        )
 
         if not response.text:
             raise HTTPException(status_code=500, detail="No response from AI.")
@@ -172,35 +177,41 @@ async def generate_story(
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Gemini story response as JSON: {e}")
         raise HTTPException(status_code=500, detail="AI returned an invalid response format.")
+    except asyncio.TimeoutError:
+        logger.error("Gemini story generation timed out")
+        raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating story: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate story: {str(e)}")
+        logger.error(f"Error generating story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate story.")
 
 
 @router.post("/generate-audio")
+@limiter.limit("10/minute")
 async def generate_audio(
-    request: AudioGenRequest,
-    api_key: str = Depends(get_api_key)
+    request: Request,
+    body: AudioGenRequest,
+    api_key: str = Depends(get_current_user)
 ):
     """Generate TTS audio for a story using Gemini AI."""
     client = _get_gemini_client()
 
-    clean_story = re.sub(r"<[^>]+>", "", request.story)
+    clean_story = re.sub(r"<[^>]+>", "", body.story)
     prompt = (
-        f"Please read the following story aloud in {request.language}:\n\n"
-        f"{request.title}\n\n{clean_story}"
+        f"Please read the following story aloud in {body.language}:\n\n"
+        f"{body.title}\n\n{clean_story}"
     )
 
     try:
         await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
-        response = await client.generate_content(prompt)
+        response = await asyncio.wait_for(
+            client.generate_content(prompt), timeout=_AI_TIMEOUT
+        )
 
         audio_part = None
         candidates = response.candidates or []
         for candidate in candidates:
-            # gemini_webapi Candidate may expose parts directly or via .content
             parts = (
                 getattr(candidate, "parts", None)
                 or getattr(getattr(candidate, "content", None), "parts", None)
@@ -225,8 +236,11 @@ async def generate_audio(
             "mime_type": audio_part.inline_data.mime_type,
         })
 
+    except asyncio.TimeoutError:
+        logger.error("Gemini audio generation timed out")
+        raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating audio: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate audio: {str(e)}")
+        logger.error(f"Error generating audio: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate audio.")
