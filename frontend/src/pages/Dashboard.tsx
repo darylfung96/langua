@@ -30,7 +30,7 @@ const modules = [
     description: 'Spatial and image memory. Connect words to vibrant imagery.',
     icon: <ImageIcon size={32} />,
     path: '/visual-memory',
-    color: 'var(--accent-success)'
+    color: 'var(--accent-secondary)'
   },
   // {
   //   title: 'Journaling',

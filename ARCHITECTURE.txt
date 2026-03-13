@@ -1,0 +1,320 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    LANGUAGE LEARNER APPLICATION ARCHITECTURE                 ║
+║                         Complete System Overview                              ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                  FRONTEND                                    │
+│                         React + TypeScript + Vite                            │
+│                        (localhost:5173 in development)                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─ Pages (src/pages/) ────────────────────────────────────────────────┐   │
+│  │                                                                       │   │
+│  │  StoryWeaver.tsx ────────────────────────────────────────────────┐  │   │
+│  │  (695 lines - MAIN FEATURE)                                     │  │   │
+│  │  ├─ Story Generation (Gemini API)                              │  │   │
+│  │  ├─ Audio Generation (Gemini TTS)                              │  │   │
+│  │  ├─ Audio Playback with Seek Controls                          │  │   │
+│  │  ├─ Save Story (POST /stories)                                 │  │   │
+│  │  ├─ Load Saved Stories (GET /stories)                          │  │   │
+│  │  ├─ Display Vocabulary Table                                   │  │   │
+│  │  └─ Delete Stories (DELETE /stories/{id})                      │  │   │
+│  │                                                                   │  │   │
+│  │  Key Functions:                                                  │  │   │
+│  │  • handleGenerate() - Story generation (line 329)               │  │   │
+│  │  • generateAudio() - Audio generation (line 388)                │  │   │
+│  │  • saveStory() - Save to backend (line 111)                     │  │   │
+│  │  • loadSavedStories() - Fetch stories list (line 94)            │  │   │
+│  │  • deleteStory() - Remove from backend (line 211)               │  │   │
+│  │  • createWavUrl() - Convert PCM to WAV (line 25)                │  │   │
+│  │                                                                   │  │   │
+│  └─────────────────────────────────────────────────────────────────┘  │   │
+│                                                                          │   │
+│  VisualMemory.tsx           Melody.tsx          ResourceLearner.tsx      │   │
+│  (Image generation)         (YouTube lyrics)    (Media transcription)    │   │
+│                                                                          │   │
+│  Dashboard.tsx              Podcasts.tsx        Writing.tsx             │   │
+│  (Home page)                (Placeholder)       (Placeholder)           │   │
+│                                                                          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ API Integration ───────────────────────────────────────────────────┐   │
+│  │                                                                       │   │
+│  │  Gemini API (@google/genai SDK)                                     │   │
+│  │  ├─ gemini-3.1-flash-lite-preview (Story Generation)                │   │
+│  │  └─ gemini-2.5-flash-preview-tts (Audio Generation)                 │   │
+│  │                                                                       │   │
+│  │  Backend API (http://localhost:8000)                                │   │
+│  │  ├─ POST   /stories                → Save story                      │   │
+│  │  ├─ GET    /stories                → List stories                    │   │
+│  │  ├─ GET    /stories/{id}           → Get story details              │   │
+│  │  └─ DELETE /stories/{id}           → Delete story                   │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ State Management ──────────────────────────────────────────────────┐   │
+│  │  • storyData: Story response from Gemini                             │   │
+│  │  • savedStories: List of saved stories from backend                  │   │
+│  │  • audioUrl: Base64 audio or blob URL                               │   │
+│  │  • isPlaying: Audio playback state                                  │   │
+│  │  • isGenerating: Story generation loading state                     │   │
+│  │  • isGeneratingAudio: Audio generation loading state                │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  Environment Variables:                                                     │
+│  • VITE_GEMINI_API_KEY (Google GenAI API key)                             │
+│  • VITE_BACKEND_API_KEY (Whisper API key for backend auth)                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                                     ↕
+                    (HTTP/REST API Communication)
+                                     ↕
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                  BACKEND                                     │
+│                           FastAPI + Python                                   │
+│                      (localhost:8000 in development)                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─ API Routes (routes/) ──────────────────────────────────────────────┐   │
+│  │                                                                       │   │
+│  │  stories.py - STORY CRUD ENDPOINTS                                  │   │
+│  │  ├─ POST /stories                                                   │   │
+│  │  │  ├─ Input: StoryRequest (title, story_content, language,        │   │
+│  │  │  │                        vocabulary, audio)                    │   │
+│  │  │  └─ Output: {id, title, language, created_at}                   │   │
+│  │  │                                                                   │   │
+│  │  ├─ GET /stories                                                    │   │
+│  │  │  └─ Output: {stories: [{id, title, language, timestamps}...]}   │   │
+│  │  │                                                                   │   │
+│  │  ├─ GET /stories/{story_id}                                         │   │
+│  │  │  └─ Output: Full story with content, vocabulary, audio path     │   │
+│  │  │                                                                   │   │
+│  │  └─ DELETE /stories/{story_id}                                      │   │
+│  │     └─ Output: {success: true}                                      │   │
+│  │                                                                       │   │
+│  │  Other Route Modules:                                               │   │
+│  │  • visual.py - Image generation endpoints                           │   │
+│  │  • lyrics.py - YouTube lyrics endpoints                             │   │
+│  │  • resources.py - Media transcription endpoints                     │   │
+│  │  • transcribe.py - Speech-to-text endpoint                          │   │
+│  │  • youtube.py - YouTube transcript endpoint                         │   │
+│  │  • image.py - Image generation endpoint (Gemini WebAPI)             │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ Services (services/) ──────────────────────────────────────────────┐   │
+│  │                                                                       │   │
+│  │  story_service.py - BUSINESS LOGIC                                  │   │
+│  │  ├─ save_story(story_data, db)                                      │   │
+│  │  │  ├─ Validate vocabulary JSON                                     │   │
+│  │  │  ├─ If audio: decode base64 → save_media_file() → get path     │   │
+│  │  │  ├─ Create Story model instance                                  │   │
+│  │  │  └─ db.add() & db.commit()                                       │   │
+│  │  │                                                                   │   │
+│  │  ├─ get_all_stories(db)                                             │   │
+│  │  │  └─ Query DB, order by created_at DESC                           │   │
+│  │  │                                                                   │   │
+│  │  ├─ get_story_by_id(story_id, db)                                   │   │
+│  │  │  └─ Query DB, return single story with full content              │   │
+│  │  │                                                                   │   │
+│  │  └─ delete_story(story_id, db)                                      │   │
+│  │     ├─ Delete from DB                                               │   │
+│  │     └─ Delete audio file if exists                                  │   │
+│  │                                                                       │   │
+│  │  Other Service Modules:                                             │   │
+│  │  • visual_service.py - Image storage operations                     │   │
+│  │  • lyric_service.py - Lyrics storage operations                     │   │
+│  │  • resource_service.py - Media resource operations                  │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ Data Layer ────────────────────────────────────────────────────────┐   │
+│  │                                                                       │   │
+│  │  database.py - SQLALCHEMY ORM MODELS                                │   │
+│  │  ├─ Story                                                            │   │
+│  │  │  ├─ id: UUID (primary key)                                       │   │
+│  │  │  ├─ user_id: String                                              │   │
+│  │  │  ├─ title: String                                                │   │
+│  │  │  ├─ story_content: Text (HTML with <span> tags)                  │   │
+│  │  │  ├─ language: String                                             │   │
+│  │  │  ├─ vocabulary: Text (JSON string)                               │   │
+│  │  │  ├─ audio_file_path: String (null)                               │   │
+│  │  │  ├─ created_at: DateTime                                         │   │
+│  │  │  └─ updated_at: DateTime                                         │   │
+│  │  │                                                                   │   │
+│  │  ├─ Lyric (YouTube transcripts)                                      │   │
+│  │  ├─ Resource (Uploaded media)                                        │   │
+│  │  └─ Visual (Generated images)                                        │   │
+│  │                                                                       │   │
+│  │  schemas.py - PYDANTIC MODELS                                       │   │
+│  │  ├─ StoryRequest - API request body                                 │   │
+│  │  ├─ StoryResponse - API response                                    │   │
+│  │  ├─ SavedStoryListItem - Story in list                              │   │
+│  │  └─ ... (other schemas for other models)                            │   │
+│  │                                                                       │   │
+│  │  file_storage.py - FILE I/O                                         │   │
+│  │  ├─ save_media_file(bytes, filename)                                │   │
+│  │  │  └─ Save to /uploads/{uuid}_{filename}                           │   │
+│  │  ├─ delete_media_file(path)                                         │   │
+│  │  │  └─ Delete from disk                                             │   │
+│  │  └─ get_media_file_path(path)                                       │   │
+│  │     └─ Get full filesystem path                                     │   │
+│  │                                                                       │   │
+│  │  security.py - AUTHENTICATION                                       │   │
+│  │  ├─ get_api_key()                                                   │   │
+│  │  │  └─ Validate X-API-Key header against WHISPER_API_KEY            │   │
+│  │  └─ All endpoints require this                                      │   │
+│  │                                                                       │   │
+│  │  config.py - CONFIGURATION                                          │   │
+│  │  ├─ DATABASE_URL: sqlite:///./stories.db                            │   │
+│  │  ├─ WHISPER_API_KEY: from environment                               │   │
+│  │  ├─ GEMINI_COOKIE_1PSID: for image generation                       │   │
+│  │  ├─ GEMINI_COOKIE_1PSIDTS: optional                                 │   │
+│  │  ├─ CORS_ORIGINS: ["http://localhost:5173"]                         │   │
+│  │  └─ WHISPER_MODEL: "medium"                                         │   │
+│  │                                                                       │   │
+│  │  utils.py - HELPERS                                                 │   │
+│  │  ├─ extract_video_id() - YouTube URL parsing                        │   │
+│  │  └─ generate_creative_prompt() - Image gen prompt                   │   │
+│  │                                                                       │   │
+│  │  main.py - FASTAPI APP                                              │   │
+│  │  ├─ Create FastAPI instance                                         │   │
+│  │  ├─ Setup CORS middleware                                           │   │
+│  │  ├─ Register all route modules                                      │   │
+│  │  ├─ Mount static files (/uploads)                                   │   │
+│  │  └─ Health check endpoint                                           │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ Database (SQLite) ─────────────────────────────────────────────────┐   │
+│  │  stories.db                                                          │   │
+│  │  ├─ stories table (Story model)                                     │   │
+│  │  ├─ lyrics table (Lyric model)                                      │   │
+│  │  ├─ resources table (Resource model)                                │   │
+│  │  └─ visuals table (Visual model)                                    │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─ File Storage ──────────────────────────────────────────────────────┐   │
+│  │  uploads/                                                            │   │
+│  │  ├─ Audio files saved here by save_media_file()                     │   │
+│  │  ├─ Naming: {uuid}_{original_filename}                              │   │
+│  │  ├─ Example: abc123_audio.mp3                                       │   │
+│  │  └─ Served by FastAPI static file mount at /uploads                 │   │
+│  │                                                                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  External APIs:                                                             │
+│  • gemini_webapi.GeminiClient (Image generation, cookie-based auth)        │
+│  • faster-whisper (Speech recognition)                                      │
+│  • youtube-transcript-api (YouTube transcripts)                             │
+│                                                                              │
+│  Environment Variables:                                                     │
+│  • WHISPER_API_KEY (Required - API key for authentication)                  │
+│  • GEMINI_COOKIE_1PSID (For image generation)                               │
+│  • GEMINI_COOKIE_1PSIDTS (Optional - For image generation)                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+
+STORY WEAVER DATA FLOW:
+
+   Frontend                          Gemini API                    Backend
+   ========                          ==========                    =======
+
+1. User Input
+   ├─ Language: "French"
+   ├─ Words: "gato, leche, rápido"
+   └─ Click "Weave Story"
+
+2. Generate Story
+                    ──────────────────────────────────────►
+                    gemini-3.1-flash-lite-preview
+                    (Generate story JSON)
+                    ◄──────────────────────────────────────
+   Display Story
+   (with highlights)
+
+3. Generate Audio (Optional)
+                    ──────────────────────────────────────►
+                    gemini-2.5-flash-preview-tts
+                    (Generate audio base64)
+                    ◄──────────────────────────────────────
+   Play Audio
+   (with seek bar)
+
+4. Save Story
+   (Base64 audio)
+                                                    POST /stories
+                                    ──────────────────────────────►
+                                    Validate & Process:
+                                    ├─ Validate vocabulary JSON
+                                    ├─ Decode base64 audio
+                                    ├─ Save audio to /uploads/
+                                    ├─ Create Story model
+                                    └─ Commit to database
+                                    ◄──────────────────────────────
+   Show Success
+
+5. List Saved Stories
+                                                    GET /stories
+                                    ──────────────────────────────►
+                                    Query all stories
+                                    from database
+                                    ◄──────────────────────────────
+   Display List
+   in Sidebar
+
+6. Load Saved Story
+                                                GET /stories/{id}
+                                    ──────────────────────────────►
+                                    Query story by ID,
+                                    parse vocabulary JSON,
+                                    return full data
+                                    ◄──────────────────────────────
+   Display Story
+   + Audio Link
+
+7. Delete Story
+                                              DELETE /stories/{id}
+                                    ──────────────────────────────►
+                                    ├─ Delete from database
+                                    └─ Delete audio file
+                                    ◄──────────────────────────────
+   Reload List
+
+═══════════════════════════════════════════════════════════════════════════════
+
+VOCABULARY TABLE STRUCTURE:
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Original Word │ Meaning in French │ Equivalent Word in English             │
+├────────────────────────────────────────────────────────────────────────────┤
+│ gato           │ gato               │ cat, a furry animal companion         │
+│ leche          │ lait               │ milk, white drink from cow            │
+│ rápido         │ rapide             │ fast, speedy movement                 │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Each row is a VocabWord:
+{
+  "word": "gato",
+  "meaning_in_target": "gato",
+  "equivalent_in_english": "cat, a furry animal companion"
+}
+
+═══════════════════════════════════════════════════════════════════════════════
+
+AUTHENTICATION:
+
+All backend endpoints require:
+  Header: X-API-Key: {WHISPER_API_KEY}
+
+Validation in: backend/security.py → get_api_key()
+Env variable:  WHISPER_API_KEY
+
+═══════════════════════════════════════════════════════════════════════════════

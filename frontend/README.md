@@ -32,7 +32,7 @@ A modern React application for language learning, built with TypeScript and Vite
    
    Fill in the required variables in `.env`:
    ```
-   VITE_TRANSCRIBE_API_KEY=your_whisper_api_key_here
+   VITE_BACKEND_API_KEY=your_backend_api_key
    ```
 
 ## Development
@@ -118,7 +118,7 @@ The optimized build is located in the `dist/` directory. Deploy by:
 ### Environment Configuration
 
 For production deployments, ensure:
-- Set `VITE_TRANSCRIBE_API_KEY` as a secure environment variable (never commit actual keys)
+- Set `VITE_BACKEND_API_KEY` as a secure environment variable (never commit actual keys)
 - Configure CORS if the backend is on a different domain
 - Use HTTPS in production
 - Configure proper caching headers for static assets

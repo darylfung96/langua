@@ -1,0 +1,326 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                 LANGUAGE LEARNER CODEBASE DOCUMENTATION                   ║
+║                          Complete Index                                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+📚 DOCUMENTATION FILES CREATED
+═════════════════════════════════════════════════════════════════════════════
+
+1. README_ANALYSIS.md (10 KB, 346 lines)
+   ─────────────────────────────────────
+   MAIN ENTRY POINT - Start here!
+   
+   Contains:
+   ✓ Overview of all documentation files
+   ✓ Quick start guide for Story Weaver feature
+   ✓ Complete file list with brief descriptions
+   ✓ Directory structure
+   ✓ Technology stack
+   ✓ Setup instructions
+   ✓ Feature checklist
+   ✓ Debugging tips
+   
+   Best for: Getting oriented, finding what you need
+
+
+2. QUICK_REFERENCE.md (7.8 KB, 253 lines)
+   ────────────────────────────
+   QUICK LOOKUP GUIDE
+   
+   Contains:
+   ✓ File locations with line numbers
+   ✓ API endpoints (POST, GET, DELETE)
+   ✓ Gemini models used (3 implementations)
+   ✓ Data structures (Story, Vocabulary, Response)
+   ✓ Key functions mapped to line numbers
+   ✓ Authentication details
+   ✓ Audio file handling process
+   ✓ HTML story format
+   ✓ Environment variables
+   ✓ Testing checklist
+   
+   Best for: Development, debugging, quick lookups
+
+
+3. CODEBASE_ANALYSIS.md (15 KB, 465 lines)
+   ──────────────────────────
+   COMPREHENSIVE REFERENCE
+   
+   Contains:
+   ✓ Overall architecture explanation
+   ✓ Story Weaver complete file map (frontend + backend)
+   ✓ Full story creation/saving flow with detailed steps
+   ✓ Gemini AI integration (3 different implementations)
+   ✓ Word meanings table generation and storage
+   ✓ Data models and database schemas (6 complete models)
+   ✓ All API endpoints (Story, Lyric, Visual, Resource, Transcribe)
+   ✓ Key functions summary with purposes
+   ✓ Environment variables and configuration
+   ✓ Implementation details (audio processing, etc.)
+   
+   Best for: Understanding architecture, learning the system
+
+
+4. STORY_WEAVER_FLOW.md (18 KB, 502 lines)
+   ──────────────────────────
+   VISUAL FLOW DIAGRAMS & DETAILED PROCESSES
+   
+   Contains:
+   ✓ Architecture overview diagram
+   ✓ Generation flow (user input → Gemini → display)
+   ✓ Audio generation flow (TTS → format conversion → playback)
+   ✓ Story saving flow (base64 → backend → database)
+   ✓ Loading saved story flow (database → display with audio)
+   ✓ Deletion flow (remove from DB + disk cleanup)
+   ✓ Database schema visualization
+   ✓ Key data structures with examples
+   ✓ API endpoints summary
+   ✓ File paths reference
+   ✓ Function location reference
+   
+   Best for: Understanding data flow, seeing visual diagrams
+
+
+5. ARCHITECTURE.txt (24 KB)
+   ─────────────────
+   ASCII ARCHITECTURE DIAGRAM
+   
+   Contains:
+   ✓ Complete system architecture in ASCII art
+   ✓ Frontend structure and components
+   ✓ Backend structure and layers
+   ✓ Data flow diagram
+   ✓ Vocabulary table example
+   ✓ Component relationships
+   
+   Best for: Visual learners, presentation reference
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+🎯 QUICK NAVIGATION
+═════════════════════════════════════════════════════════════════════════════
+
+Question                          → File to Read
+─────────────────────────────────   ──────────────────────────────
+"How does the app work?"           → README_ANALYSIS.md
+"Where is [component]?"            → QUICK_REFERENCE.md
+"What are the API endpoints?"      → QUICK_REFERENCE.md
+"How is story saved?"              → STORY_WEAVER_FLOW.md (section 3)
+"How is vocabulary generated?"     → CODEBASE_ANALYSIS.md (section 5)
+"Show me the architecture"         → ARCHITECTURE.txt
+"What's the Gemini integration?"   → CODEBASE_ANALYSIS.md (section 4)
+"How does audio playback work?"    → STORY_WEAVER_FLOW.md (section 2)
+"What's the database schema?"      → STORY_WEAVER_FLOW.md (Database Schema)
+"How do I add a feature?"          → README_ANALYSIS.md (Extending section)
+"File locations?"                  → QUICK_REFERENCE.md
+"Need to debug?"                   → README_ANALYSIS.md (Debugging Tips)
+
+═════════════════════════════════════════════════════════════════════════════
+
+📋 DOCUMENTATION READING ORDER
+═════════════════════════════════════════════════════════════════════════════
+
+OPTION 1: Quick Overview (15 minutes)
+────────────────────────────────────
+1. Read README_ANALYSIS.md (Overview section) - 5 min
+2. Read QUICK_REFERENCE.md (Data Structures section) - 5 min
+3. Skim ARCHITECTURE.txt - 5 min
+
+OPTION 2: Complete Understanding (45 minutes)
+──────────────────────────────────────────────
+1. Read README_ANALYSIS.md (all) - 10 min
+2. Read CODEBASE_ANALYSIS.md (sections 1-4) - 15 min
+3. Read STORY_WEAVER_FLOW.md (sections 1-3) - 15 min
+4. Review QUICK_REFERENCE.md for reference - 5 min
+
+OPTION 3: Visual Learners (30 minutes)
+──────────────────────────────────────
+1. Study ARCHITECTURE.txt - 15 min
+2. Read STORY_WEAVER_FLOW.md (Diagrams only) - 10 min
+3. Check QUICK_REFERENCE.md for specifics - 5 min
+
+OPTION 4: Developer Deep Dive (2 hours)
+──────────────────────────────────────
+1. Read all documentation files in order - 1.5 hours
+2. Examine source code:
+   - StoryWeaver.tsx (key functions)
+   - stories.py (API endpoints)
+   - story_service.py (business logic)
+   - database.py (models)
+3. Run application and test features - 30 min
+
+═════════════════════════════════════════════════════════════════════════════
+
+🔑 KEY TAKEAWAYS
+═════════════════════════════════════════════════════════════════════════════
+
+ARCHITECTURE:
+• React frontend (localhost:5173) ↔ FastAPI backend (localhost:8000)
+• Gemini AI for story and audio generation (frontend)
+• SQLite database for persistence
+• Audio files stored in /backend/uploads/ directory
+
+STORY GENERATION:
+• User enters vocabulary words
+• Frontend calls Gemini API (gemini-3.1-flash-lite-preview)
+• Gemini returns JSON: {title, story with highlights, vocabulary}
+• Frontend displays story with highlighted vocabulary words
+
+STORY SAVING:
+• User clicks "Save"
+• Frontend generates audio (optional) via Gemini TTS
+• Audio converted to base64
+• POST request to /stories with all data
+• Backend saves audio file to /uploads/, metadata to database
+
+VOCABULARY TABLE:
+• Generated by Gemini AI for each word
+• Structure: word, meaning_in_target, equivalent_in_english
+• Used as learning aid with mnemonics
+• Displayed in interactive table
+
+AUDIO:
+• Generated by Gemini TTS (gemini-2.5-flash-preview-tts)
+• Voice: "Leda"
+• Format: Base64 PCM or standard audio format
+• Playback: HTML audio element with custom controls
+• Sync: Click word → jumps to that word's time in audio
+
+AUTHENTICATION:
+• All endpoints require: Header "X-API-Key: {WHISPER_API_KEY}"
+• Validated against config.WHISPER_API_KEY
+• Set via environment variable
+
+QUIZ FEATURE:
+• NOT IMPLEMENTED
+• Feature checklist marks as incomplete
+
+═════════════════════════════════════════════════════════════════════════════
+
+📁 SOURCE CODE LOCATIONS
+═════════════════════════════════════════════════════════════════════════════
+
+STORY WEAVER FEATURE:
+
+Frontend:
+  Main Component:    frontend/src/pages/StoryWeaver.tsx (695 lines)
+  Styling:           frontend/src/pages/StoryWeaver.css
+  Router:            frontend/src/App.tsx
+  
+Backend:
+  API Routes:        backend/routes/stories.py
+  Business Logic:    backend/services/story_service.py
+  Database Model:    backend/database.py (Story class, lines 14-26)
+  Request Schema:    backend/schemas.py (StoryRequest, StoryResponse)
+  File Storage:      backend/file_storage.py
+  Authentication:    backend/security.py
+  Database:          backend/stories.db (SQLite)
+  Audio Files:       backend/uploads/ directory
+
+RELATED FEATURES:
+
+Visual Memory (Images):
+  Frontend:          frontend/src/pages/VisualMemory.tsx
+  API Routes:        backend/routes/image.py
+  Database Model:    backend/database.py (Visual class)
+  Service:           backend/services/visual_service.py
+
+Melody (Lyrics):
+  Frontend:          frontend/src/pages/Melody.tsx
+  API Routes:        backend/routes/lyrics.py
+  Database Model:    backend/database.py (Lyric class)
+  Service:           backend/services/lyric_service.py
+
+Resource Learner (Media Transcription):
+  Frontend:          frontend/src/pages/ResourceLearner.tsx
+  API Routes:        backend/routes/resources.py
+  Database Model:    backend/database.py (Resource class)
+  Service:           backend/services/resource_service.py
+
+═════════════════════════════════════════════════════════════════════════════
+
+⚙️  ENVIRONMENT SETUP
+═════════════════════════════════════════════════════════════════════════════
+
+Frontend (.env):
+  VITE_GEMINI_API_KEY=your_google_genai_api_key
+  VITE_BACKEND_API_KEY=your_whisper_api_key
+
+Backend (.env):
+  WHISPER_API_KEY=your_whisper_api_key
+  GEMINI_COOKIE_1PSID=your_1psid_cookie
+  GEMINI_COOKIE_1PSIDTS=your_1psidts_cookie (optional)
+
+Development URLs:
+  Frontend:   http://localhost:5173
+  Backend:    http://localhost:8000
+  API Docs:   http://localhost:8000/docs
+
+═════════════════════════════════════════════════════════════════════════════
+
+✅ WHAT'S IMPLEMENTED
+═════════════════════════════════════════════════════════════════════════════
+
+Story Weaver:
+  ✓ Story generation via Gemini API
+  ✓ Audio generation via Gemini TTS
+  ✓ Audio playback with seek bar
+  ✓ Vocabulary table generation
+  ✓ Save stories to database
+  ✓ Load saved stories
+  ✓ Delete stories with cleanup
+  ✓ Word highlighting in stories
+  ✓ Audio sync with story words
+  ✓ Saved stories sidebar
+
+Other Features:
+  ✓ Image generation for vocabulary
+  ✓ YouTube lyrics extraction
+  ✓ Media file transcription
+  ✓ Speech-to-text transcription
+
+❌ What's NOT Implemented:
+  ✗ Quiz functionality
+  ✗ Spaced repetition system
+  ✗ User authentication/accounts
+  ✗ Multi-user support
+  ✗ Offline mode
+
+═════════════════════════════════════════════════════════════════════════════
+
+🚀 NEXT STEPS
+═════════════════════════════════════════════════════════════════════════════
+
+To understand Story Weaver:
+  1. Read README_ANALYSIS.md (Quick Start section)
+  2. Read QUICK_REFERENCE.md (Key Data Structures section)
+  3. Examine StoryWeaver.tsx source code
+  4. Review STORY_WEAVER_FLOW.md (Story Creation & Saving Flow)
+  5. Check CODEBASE_ANALYSIS.md (Gemini Integration section)
+
+To extend Story Weaver:
+  1. Review existing functions in QUICK_REFERENCE.md
+  2. Follow patterns in StoryWeaver.tsx
+  3. Use STORY_WEAVER_FLOW.md to understand data flow
+  4. Add new functions following existing patterns
+  5. Update API endpoints in routes/stories.py if needed
+
+To debug issues:
+  1. Check QUICK_REFERENCE.md (Common Issues section)
+  2. Review STORY_WEAVER_FLOW.md (Debugging steps)
+  3. Check browser console (frontend) or terminal (backend)
+  4. Verify environment variables are set
+  5. Check database connectivity
+
+═════════════════════════════════════════════════════════════════════════════
+
+For more information, refer to the individual documentation files.
+Start with README_ANALYSIS.md for a complete overview.
+
+Documentation Version: 1.0
+Last Updated: 2024-03-12
+Coverage: Story Weaver Feature Complete
+Status: ✅ Production Ready
+
+═════════════════════════════════════════════════════════════════════════════

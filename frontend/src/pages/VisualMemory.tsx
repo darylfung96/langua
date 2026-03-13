@@ -1,6 +1,6 @@
 
-import { useState } from 'react';
-import { Sparkles, Loader, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Sparkles, Loader, AlertCircle, BookOpen, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import './VisualMemory.css';
 
@@ -20,12 +20,85 @@ interface ImageResponse {
   success: boolean;
 }
 
+interface SavedVisual {
+  id: string;
+  word: string;
+  language: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VisualDetail extends SavedVisual {
+  images: GeneratedImage[];
+  prompt: string;
+  explanation: string;
+}
+
 const VisualMemory = () => {
   const [word, setWord] = useState('');
   const [language, setLanguage] = useState('en');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [imageData, setImageData] = useState<ImageResponse | null>(null);
+  const [view, setView] = useState<'generator' | 'library'>('generator');
+  const [savedVisuals, setSavedVisuals] = useState<SavedVisual[]>([]);
+  const [selectedVisual, setSelectedVisual] = useState<VisualDetail | null>(null);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+  const apiKey = import.meta.env.VITE_BACKEND_API_KEY;
+
+  useEffect(() => {
+    if (view === 'library') {
+      loadVisuals();
+    }
+  }, [view]);
+
+  const loadVisuals = async () => {
+    setLoadingLibrary(true);
+    try {
+      const response = await fetch(`${backendUrl}/visuals`, {
+        headers: {
+          'X-API-Key': apiKey,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load visuals');
+      }
+
+      const data = await response.json();
+      setSavedVisuals(data.visuals || []);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load visuals'
+      );
+    } finally {
+      setLoadingLibrary(false);
+    }
+  };
+
+  const loadVisualDetail = async (visualId: string) => {
+    try {
+      const response = await fetch(`${backendUrl}/visuals/${visualId}`, {
+        headers: {
+          'X-API-Key': apiKey,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load visual details');
+      }
+
+      const data = await response.json();
+      setSelectedVisual(data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load visual details'
+      );
+    }
+  };
 
   const handleGenerateImage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +113,6 @@ const VisualMemory = () => {
     setImageData(null);
 
     try {
-      const apiKey = import.meta.env.VITE_TRANSCRIBE_API_KEY;
       if (!apiKey) {
         setError('API key not found. Please set it in settings.');
         setLoading(false);
@@ -53,7 +125,7 @@ const VisualMemory = () => {
       });
 
       const response = await fetch(
-        `http://localhost:8000/generate-image?${params}`,
+        `${backendUrl}/generate-image?${params}`,
         {
           method: 'POST',
           headers: {
@@ -68,7 +140,6 @@ const VisualMemory = () => {
       }
 
       const data: ImageResponse = await response.json();
-      console.log(data)
       if (data.success) {
         setImageData(data);
       } else {
@@ -83,6 +154,73 @@ const VisualMemory = () => {
     }
   };
 
+  const handleSaveVisual = async () => {
+    if (!imageData) return;
+
+    setSaving(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${backendUrl}/visuals`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          word: imageData.word,
+          language: imageData.language,
+          images: JSON.stringify(imageData.images),
+          prompt: imageData.prompt,
+          explanation: imageData.text_response,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save visual');
+      }
+
+      setImageData(null);
+      setWord('');
+      setError('');
+      // Show success message
+      alert('Visual saved successfully!');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to save visual'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteVisual = async (visualId: string) => {
+    if (!confirm('Are you sure you want to delete this visual?')) return;
+
+    try {
+      const response = await fetch(`${backendUrl}/visuals/${visualId}`, {
+        method: 'DELETE',
+        headers: {
+          'X-API-Key': apiKey,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete visual');
+      }
+
+      setSavedVisuals(savedVisuals.filter((v) => v.id !== visualId));
+      if (selectedVisual?.id === visualId) {
+        setSelectedVisual(null);
+      }
+      alert('Visual deleted successfully!');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to delete visual'
+      );
+    }
+  };
+
   return (
     <div className="page-container animate-fade-in">
       <header className="page-header">
@@ -91,110 +229,231 @@ const VisualMemory = () => {
       </header>
       <div className="page-content">
         <div className="visual-memory-container">
-          <form onSubmit={handleGenerateImage} className="word-input-form">
-            <div className="form-group">
-              <label htmlFor="word">Word to Remember</label>
-              <input
-                id="word"
-                type="text"
-                value={word}
-                onChange={(e) => setWord(e.target.value)}
-                placeholder="Enter a word..."
-                disabled={loading}
-                className="word-input"
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="language">Language</label>
-              <select
-                id="language"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                disabled={loading}
-                className="language-select"
-              >
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="de">German</option>
-                <option value="it">Italian</option>
-                <option value="pt">Portuguese</option>
-                <option value="ja">Japanese</option>
-                <option value="zh-CN">Chinese (Simplified)</option>
-                <option value="zh-TW">Chinese (Traditional)</option>
-                <option value="ko">Korean</option>
-                <option value="ru">Russian</option>
-                <option value="ar">Arabic</option>
-                <option value="hi">Hindi</option>
-                <option value="nl">Dutch</option>
-                <option value="pl">Polish</option>
-                <option value="tr">Turkish</option>
-              </select>
-            </div>
-
+          <div className="view-tabs">
             <button
-              type="submit"
-              disabled={loading}
-              className="generate-btn"
+              className={`tab-btn ${view === 'generator' ? 'active' : ''}`}
+              onClick={() => setView('generator')}
             >
-              {loading ? (
-                <>
-                  <Loader className="spinner" size={20} />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={20} />
-                  Generate Image
-                </>
-              )}
+              <Sparkles size={18} />
+              Generator
             </button>
-          </form>
+            <button
+              className={`tab-btn ${view === 'library' ? 'active' : ''}`}
+              onClick={() => setView('library')}
+            >
+              <BookOpen size={18} />
+              Library
+            </button>
+          </div>
 
-          {error && (
-            <div className="error-message">
-              <AlertCircle size={20} />
-              {error}
-            </div>
-          )}
-
-          {imageData && (
-            <div className="image-result">
-              <div className="result-header">
-                <h3>
-                  {imageData.word}
-                  <span className="language-tag">{imageData.language}</span>
-                </h3>
-              </div>
-
-              {imageData.images && imageData.images.length > 0 && (
-                <div className="image-container">
-                  <img
-                    src={`data:image/png;base64,${imageData.images[0].base64}`}
-                    alt={imageData.word}
-                    className="generated-image"
+          {view === 'generator' ? (
+            <>
+              <form onSubmit={handleGenerateImage} className="word-input-form">
+                <div className="form-group">
+                  <label htmlFor="word">Word to Remember</label>
+                  <input
+                    id="word"
+                    type="text"
+                    value={word}
+                    onChange={(e) => setWord(e.target.value)}
+                    placeholder="Enter a word..."
+                    disabled={loading}
+                    className="word-input"
                   />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="language">Language</label>
+                  <select
+                    id="language"
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    disabled={loading}
+                    className="language-select"
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="it">Italian</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ja">Japanese</option>
+                    <option value="zh-CN">Chinese (Simplified)</option>
+                    <option value="zh-TW">Chinese (Traditional)</option>
+                    <option value="ko">Korean</option>
+                    <option value="ru">Russian</option>
+                    <option value="ar">Arabic</option>
+                    <option value="hi">Hindi</option>
+                    <option value="nl">Dutch</option>
+                    <option value="pl">Polish</option>
+                    <option value="tr">Turkish</option>
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="generate-btn"
+                >
+                  {loading ? (
+                    <>
+                      <Loader className="spinner" size={20} />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={20} />
+                      Generate Image
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {error && (
+                <div className="error-message">
+                  <AlertCircle size={20} />
+                  {error}
                 </div>
               )}
 
-              <div className="image-description">
-                <h4>Memory Aid</h4>
-                <ReactMarkdown>{imageData.text_response}</ReactMarkdown>
-              </div>
+              {imageData && (
+                <div className="image-result">
+                  <div className="result-header">
+                    <h3>
+                      {imageData.word}
+                      <span className="language-tag">{imageData.language}</span>
+                    </h3>
+                  </div>
 
-              <div className="image-prompt">
-                <h4>Visual Prompt</h4>
-                <p>{imageData.prompt}</p>
-              </div>
-            </div>
-          )}
+                  {imageData.images && imageData.images.length > 0 && (
+                    <div className="image-container">
+                      <img
+                        src={`data:image/png;base64,${imageData.images[0].base64}`}
+                        alt={imageData.word}
+                        className="generated-image"
+                      />
+                    </div>
+                  )}
 
-          {!imageData && !loading && !error && (
-            <div className="empty-state">
-              <Sparkles size={48} />
-              <p>Enter a word and generate an unforgettable visual!</p>
-            </div>
+                  <div className="image-description">
+                    <h4>Memory Aid</h4>
+                    <ReactMarkdown>{imageData.text_response}</ReactMarkdown>
+                  </div>
+
+                  <div className="image-prompt">
+                    <h4>Visual Prompt</h4>
+                    <p>{imageData.prompt}</p>
+                  </div>
+
+                  <div className="image-actions">
+                    <button
+                      className="save-btn"
+                      onClick={handleSaveVisual}
+                      disabled={saving}
+                    >
+                      {saving ? 'Saving...' : '💾 Save Visual'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!imageData && !loading && !error && (
+                <div className="empty-state">
+                  <Sparkles size={48} />
+                  <p>Enter a word and generate an unforgettable visual!</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {loadingLibrary ? (
+                <div className="loading-state">
+                  <Loader className="spinner" size={40} />
+                  <p>Loading your visuals...</p>
+                </div>
+              ) : selectedVisual ? (
+                <div className="visual-detail">
+                  <button
+                    className="back-btn"
+                    onClick={() => setSelectedVisual(null)}
+                  >
+                    ← Back to Library
+                  </button>
+                  <div className="detail-header">
+                    <h3>{selectedVisual.word}</h3>
+                    <span className="language-tag">{selectedVisual.language}</span>
+                  </div>
+
+                  {selectedVisual.images && selectedVisual.images.length > 0 && (
+                    <div className="image-container">
+                      <img
+                        src={`data:image/png;base64,${selectedVisual.images[0].base64}`}
+                        alt={selectedVisual.word}
+                        className="generated-image"
+                      />
+                    </div>
+                  )}
+
+                  {selectedVisual.explanation && (
+                    <div className="image-description">
+                      <h4>Memory Aid</h4>
+                      <ReactMarkdown>{selectedVisual.explanation}</ReactMarkdown>
+                    </div>
+                  )}
+
+                  <div className="image-prompt">
+                    <h4>Visual Prompt</h4>
+                    <p>{selectedVisual.prompt}</p>
+                  </div>
+
+                  <div className="detail-footer">
+                    <p className="created-date">
+                      Created: {new Date(selectedVisual.created_at).toLocaleDateString()}
+                    </p>
+                    <button
+                      className="delete-btn"
+                      onClick={() => handleDeleteVisual(selectedVisual.id)}
+                    >
+                      <Trash2 size={18} />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {error && (
+                    <div className="error-message">
+                      <AlertCircle size={20} />
+                      {error}
+                    </div>
+                  )}
+                  {savedVisuals.length === 0 ? (
+                    <div className="empty-state">
+                      <BookOpen size={48} />
+                      <p>No saved visuals yet. Create some in the Generator!</p>
+                    </div>
+                  ) : (
+                    <div className="visuals-grid">
+                      {savedVisuals.map((visual) => (
+                        <div
+                          key={visual.id}
+                          className="visual-card"
+                          onClick={() => loadVisualDetail(visual.id)}
+                        >
+                          <div className="card-header">
+                            <h4>{visual.word}</h4>
+                            <span className="language-tag">{visual.language}</span>
+                          </div>
+                          <p className="card-date">
+                            {new Date(visual.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       </div>

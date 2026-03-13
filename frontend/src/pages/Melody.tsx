@@ -2,8 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import ReactPlayer from 'react-player';
 import { YoutubeTranscript } from '../utils/YoutubeTranscript';
 import type { TranscriptSection } from '../utils/YoutubeTranscript';
-import { Search, Loader2, Music, Youtube, Play, ExternalLink } from 'lucide-react';
+import { Search, Loader2, Music, Youtube, Play, ExternalLink, Save, Trash2 } from 'lucide-react';
 import './Melody.css';
+
+interface SavedLyric {
+  id: string;
+  title: string;
+  language: string;
+  created_at: string;
+}
 
 const Melody = () => {
   const [url, setUrl] = useState('');
@@ -11,15 +18,46 @@ const Melody = () => {
   const [transcript, setTranscript] = useState<TranscriptSection[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedLyrics, setSavedLyrics] = useState<SavedLyric[]>([]);
+  const [isLoadingSavedLyrics, setIsLoadingSavedLyrics] = useState(false);
+  const [videoTitle, setVideoTitle] = useState('');
+  const [language, setLanguage] = useState('en');
 
-  const playerRef = useRef<any>(null); // Use any for ReactPlayer ref until types are fully sorted
+  const playerRef = useRef<any>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
+
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+  const backendApiKey = import.meta.env.VITE_BACKEND_API_KEY;
+
+  // Load saved lyrics on mount
+  useEffect(() => {
+    loadSavedLyrics();
+  }, []);
+
+  const loadSavedLyrics = async () => {
+    setIsLoadingSavedLyrics(true);
+    try {
+      const response = await fetch(`${backendUrl}/lyrics`, {
+        headers: { 'X-API-Key': backendApiKey }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSavedLyrics(data.lyrics);
+      }
+    } catch (err) {
+      console.error('Failed to load saved lyrics:', err);
+    } finally {
+      setIsLoadingSavedLyrics(false);
+    }
+  };
 
   const handleFetch = async () => {
     const id = YoutubeTranscript.extractVideoId(url);
-    console.log("VIDEO ID:", id);   // add this
+    console.log("VIDEO ID:", id);
 
     if (!id) {
       setError('Invalid YouTube URL');
@@ -32,12 +70,93 @@ const Melody = () => {
 
     try {
       const data = await YoutubeTranscript.fetchTranscript(id);
-      setTranscript(data);
+      setTranscript(data.segments);
+      setLanguage(data.language);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch transcript. Ensure the video has subtitles.');
       setTranscript([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const saveLyric = async () => {
+    if (!videoId || transcript.length === 0) return;
+
+    setIsSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const saveResponse = await fetch(`${backendUrl}/lyrics`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': backendApiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: videoTitle || `Video ${videoId}`,
+          video_id: videoId,
+          language: language,
+          transcript: JSON.stringify(transcript)
+        })
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save lyric');
+      }
+
+      setSuccess('Lyrics saved successfully!');
+      setTimeout(() => setSuccess(null), 2000);
+
+      // Reload saved lyrics
+      loadSavedLyrics();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to save lyric');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const loadLyricFromSaved = async (lyricId: string) => {
+    try {
+      const response = await fetch(`${backendUrl}/lyrics/${lyricId}`, {
+        headers: { 'X-API-Key': backendApiKey }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load lyric');
+      }
+
+      const data = await response.json();
+      setVideoId(data.video_id);
+      setTranscript(data.transcript);
+      setVideoTitle(data.title);
+      setLanguage(data.language);
+      setIsPlaying(false);
+      setCurrentTime(0);
+    } catch (err) {
+      setError('Failed to load lyric');
+    }
+  };
+
+  const deleteLyric = async (lyricId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this lyric?')) return;
+
+    try {
+      const response = await fetch(`${backendUrl}/lyrics/${lyricId}`, {
+        method: 'DELETE',
+        headers: { 'X-API-Key': backendApiKey }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete lyric');
+      }
+
+      loadSavedLyrics();
+    } catch (err) {
+      setError('Failed to delete lyric');
     }
   };
 
@@ -59,11 +178,13 @@ const Melody = () => {
   // Scroll active line into view
   useEffect(() => {
     if (activeIndex !== -1 && transcriptScrollRef.current) {
-      const activeEl = transcriptScrollRef.current.children[activeIndex] as HTMLElement;
+      const container = transcriptScrollRef.current;
+      const activeEl = container.children[activeIndex] as HTMLElement;
       if (activeEl) {
-        activeEl.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center'
+        const scrollTop = activeEl.offsetTop - (container.clientHeight / 2) + (activeEl.clientHeight / 2);
+        container.scrollTo({
+          top: scrollTop,
+          behavior: 'smooth'
         });
       }
     }
@@ -114,8 +235,34 @@ const Melody = () => {
         </div>
 
         {error && (
-          <div className="error-card glass-panel" style={{ color: '#ef4444', marginBottom: '2rem', padding: '1rem' }}>
+          <div className="error-card glass-panel" style={{ color: '#ff6b6b', marginBottom: '2rem', padding: '1rem' }}>
             <p>{error}</p>
+          </div>
+        )}
+        {success && (
+          <div className="success-card glass-panel" style={{ color: '#51cf66', marginBottom: '2rem', padding: '1rem' }}>
+            <p>{success}</p>
+          </div>
+        )}
+
+        {videoId && transcript.length > 0 && (
+          <div className="save-section glass-panel" style={{ marginBottom: '2rem', padding: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Give this lyric a title (optional)"
+              value={videoTitle}
+              onChange={(e) => setVideoTitle(e.target.value)}
+              style={{ flex: 1, padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+            />
+            <button
+              className="save-btn"
+              onClick={saveLyric}
+              disabled={isSaving}
+              style={{ background: isSaving ? 'rgba(99, 102, 241, 0.5)' : 'var(--accent-primary)', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '0.25rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Save size={18} />
+              {isSaving ? 'Saving...' : 'Save Lyrics'}
+            </button>
           </div>
         )}
 
@@ -198,6 +345,56 @@ const Melody = () => {
             </div>
           </div>
         </div>
+
+        {/* Saved Lyrics Section */}
+        {savedLyrics.length > 0 && (
+          <div className="saved-lyrics-section glass-panel" style={{ marginTop: '2rem', padding: '1rem' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Saved Lyrics</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem' }}>
+              {savedLyrics.map((lyric) => (
+                <div
+                  key={lyric.id}
+                  onClick={() => loadLyricFromSaved(lyric.id)}
+                  style={{
+                    padding: '1rem',
+                    background: 'rgba(99, 102, 241, 0.1)',
+                    borderRadius: '0.5rem',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                    border: '1px solid rgba(99, 102, 241, 0.3)'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99, 102, 241, 0.2)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(99, 102, 241, 0.1)'}
+                >
+                  <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--accent-primary)' }}>{lyric.title}</h4>
+                  <p style={{ margin: '0.5rem 0', fontSize: '0.875rem', opacity: 0.7 }}>Language: {lyric.language}</p>
+                  <p style={{ margin: '0.5rem 0', fontSize: '0.75rem', opacity: 0.5 }}>
+                    {new Date(lyric.created_at).toLocaleDateString()}
+                  </p>
+                  <button
+                    onClick={(e) => deleteLyric(lyric.id, e)}
+                    style={{
+                      marginTop: '0.5rem',
+                      background: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '0.25rem',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem'
+                    }}
+                  >
+                    <Trash2 size={12} />
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

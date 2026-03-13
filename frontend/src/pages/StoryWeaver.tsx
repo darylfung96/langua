@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Sparkles, Play, Pause, BookOpen, Volume2, Loader2 } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { Sparkles, Play, Pause, BookOpen, Volume2, Loader2, Save, Trash2, Brain, RefreshCw, CheckCircle2, XCircle, Trophy } from 'lucide-react';
 import './StoryWeaver.css';
 
 interface VocabWord {
@@ -13,6 +12,27 @@ interface StoryResponse {
   title: string;
   story: string;
   vocabulary: VocabWord[];
+}
+
+interface SavedStory {
+  id: string;
+  title: string;
+  language: string;
+  created_at: string;
+}
+
+interface QuizQuestion {
+  id: number;
+  type: 'multiple_choice' | 'fill_blank' | 'true_false';
+  question: string;
+  options?: string[];
+  correct_answer: string;
+  explanation: string;
+  word: string;
+}
+
+interface QuizData {
+  questions: QuizQuestion[];
 }
 
 const createWavUrl = (base64Data: string, sampleRate = 24000) => {
@@ -58,12 +78,25 @@ const createWavUrl = (base64Data: string, sampleRate = 24000) => {
 };
 
 const StoryWeaver = () => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+  const backendApiKey = import.meta.env.VITE_BACKEND_API_KEY;
   const [language, setLanguage] = useState('French');
   const [inputWords, setInputWords] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [storyData, setStoryData] = useState<StoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedStories, setSavedStories] = useState<SavedStory[]>([]);
+  const [isLoadingSavedStories, setIsLoadingSavedStories] = useState(false);
+
+  // Quiz state
+  const [quizData, setQuizData] = useState<QuizData | null>(null);
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
+  const [fillBlankInputs, setFillBlankInputs] = useState<Record<number, string>>({});
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [quizScore, setQuizScore] = useState(0);
 
   // Audio state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -72,6 +105,159 @@ const StoryWeaver = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Load saved stories on mount
+  useEffect(() => {
+    loadSavedStories();
+  }, []);
+
+  const loadSavedStories = async () => {
+    setIsLoadingSavedStories(true);
+    try {
+      const response = await fetch(`${backendUrl}/stories`, {
+        headers: { 'X-API-Key': backendApiKey }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSavedStories(data.stories);
+      }
+    } catch (err) {
+      console.error('Failed to load saved stories:', err);
+    } finally {
+      setIsLoadingSavedStories(false);
+    }
+  };
+
+  const saveStory = async () => {
+    if (!storyData) return;
+
+    setIsSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      let audioData = null;
+
+      // Extract base64 audio if available
+      if (audioUrl) {
+        console.log('Audio URL exists:', audioUrl.substring(0, 50));
+        if (audioUrl.startsWith('data:')) {
+          // Extract base64 from data URL
+          audioData = audioUrl.split(',')[1];
+          console.log('Extracted base64 audio, length:', audioData?.length);
+        } else if (audioUrl.startsWith('blob:')) {
+          // Convert blob URL to base64
+          const response = await fetch(audioUrl);
+          const blob = await response.blob();
+          audioData = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64 = (reader.result as string).split(',')[1];
+              console.log('Converted blob to base64, length:', base64.length);
+              resolve(base64);
+            };
+            reader.readAsDataURL(blob);
+          });
+        }
+      } else {
+        console.log('No audio URL available for saving');
+      }
+
+      console.log('Saving story with audio:', audioData ? 'yes' : 'no');
+
+      const saveResponse = await fetch(`${backendUrl}/stories`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': backendApiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: `${storyData.title} (${inputWords})`,
+          story_content: storyData.story,
+          language: language,
+          vocabulary: JSON.stringify(storyData.vocabulary),
+          quiz: quizData ? JSON.stringify(quizData) : null,
+          audio: audioData
+        })
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save story');
+      }
+
+      const savedData = await saveResponse.json();
+      setSuccess('Story saved successfully!');
+      setTimeout(() => setSuccess(null), 2000);
+
+      // Reload saved stories
+      loadSavedStories();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to save story');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const loadStoryFromSaved = async (storyId: string) => {
+    try {
+      const response = await fetch(`${backendUrl}/stories/${storyId}`, {
+        headers: { 'X-API-Key': backendApiKey }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load story');
+      }
+
+      const data = await response.json();
+      setStoryData({
+        title: data.title,
+        story: data.story_content,
+        vocabulary: data.vocabulary
+      });
+      // Load quiz if saved
+      if (data.quiz) {
+        setQuizData(data.quiz);
+        setUserAnswers({});
+        setFillBlankInputs({});
+        setQuizSubmitted(false);
+        setQuizScore(0);
+      } else {
+        setQuizData(null);
+      }
+      // Set audio URL from saved data if available
+      if (data.audio_file_path) {
+        const audioUrl = `${backendUrl}/${data.audio_file_path}`;
+        setAudioUrl(audioUrl);
+      } else {
+        setAudioUrl(null);
+      }
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+    } catch (err) {
+      setError('Failed to load story');
+    }
+  };
+
+  const deleteStory = async (storyId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this story?')) return;
+
+    try {
+      const response = await fetch(`${backendUrl}/stories/${storyId}`, {
+        method: 'DELETE',
+        headers: { 'X-API-Key': backendApiKey }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete story');
+      }
+
+      loadSavedStories();
+    } catch (err) {
+      setError('Failed to delete story');
+    }
+  };
 
   useEffect(() => {
     // Cleanup dynamic URL if needed (we'll use base64 mostly, but good practice)
@@ -174,53 +360,31 @@ const StoryWeaver = () => {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputWords.trim()) return;
-    if (!apiKey.trim()) {
-      setError('Please provide a Gemini API Key.');
-      return;
-    }
 
     setIsGenerating(true);
     setStoryData(null);
-    setAudioUrl(null); // Reset audio for new story
+    setAudioUrl(null);
     setIsPlaying(false);
     setError(null);
+    setQuizData(null);
+    setUserAnswers({});
+    setFillBlankInputs({});
+    setQuizSubmitted(false);
+    setQuizScore(0);
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Write a short, engaging story in ${language} that incorporates the following vocabulary words: ${inputWords}. 
-      
-      Return the result as a raw JSON object with this exact structure:
-      {
-        "title": "Story Title in ${language}",
-        "story": "The story in ${language}, with the requested vocabulary words wrapped in <span class='highlight' title='English Translation'>word</span>. Make sure the HTML is exactly like this.",
-        "vocabulary": [
-          {
-            "word": "The original word submitted by the user",
-            "meaning_in_target": "The translated word in ${language}",
-            "equivalent_in_english": "The equivalent word in English"
-          }
-        ]
-      }
-      
-      Ensure your response is ONLY valid JSON, without any markdown formatting like \`\`\`json.`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
-        contents: prompt,
+      const response = await fetch(`${backendUrl}/gemini/generate-story`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        body: JSON.stringify({ language, words: inputWords }),
       });
 
-      if (!response.text) {
-        throw new Error("No response from AI.");
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to generate story.');
       }
 
-      let jsonText = response.text.trim();
-      if (jsonText.startsWith('```json')) {
-        jsonText = jsonText.replace(/^```json/, '').replace(/```$/, '').trim();
-      } else if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/^```/, '').replace(/```$/, '').trim();
-      }
-
-      const parsedData = JSON.parse(jsonText);
+      const parsedData = await response.json();
       setStoryData(parsedData);
     } catch (err: any) {
       console.error(err);
@@ -231,52 +395,40 @@ const StoryWeaver = () => {
   };
 
   const generateAudio = async () => {
-    if (!storyData || !apiKey.trim() || isGeneratingAudio) return;
+    if (!storyData || isGeneratingAudio) return;
 
     setIsGeneratingAudio(true);
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      // Strip HTML tags from the story for reading
-      const cleanStory = storyData.story.replace(/<[^>]+>/g, '');
-      const prompt = `Please read the following story aloud in ${language}:\n\n${storyData.title}\n\n${cleanStory}`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-preview-tts',
-        contents: prompt,
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: 'Leda'
-              }
-            }
-          }
-        }
+      const response = await fetch(`${backendUrl}/gemini/generate-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        body: JSON.stringify({
+          language,
+          title: storyData.title,
+          story: storyData.story,
+        }),
       });
 
-      // Find the Audio part
-      const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.mimeType?.startsWith('audio/'));
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to generate audio.');
+      }
 
-      if (audioPart && audioPart.inlineData && audioPart.inlineData.mimeType && audioPart.inlineData.data) {
-        let url = '';
-        if (audioPart.inlineData.mimeType.includes('pcm')) {
-          url = createWavUrl(audioPart.inlineData.data);
-        } else {
-          url = `data:${audioPart.inlineData.mimeType};base64,${audioPart.inlineData.data}`;
-        }
-        setAudioUrl(url);
-        // Play immediately after generating
-        if (audioRef.current) {
-          // wait for state update to load source, then play
-          setTimeout(() => {
-            audioRef.current?.play().catch(e => console.error("Error playing audio:", e));
-          }, 0);
-        }
+      const { audio_data, mime_type } = await response.json();
+
+      let url = '';
+      if (mime_type.includes('pcm')) {
+        url = createWavUrl(audio_data);
       } else {
-        throw new Error("No audio returned from the model.");
+        url = `data:${mime_type};base64,${audio_data}`;
+      }
+      setAudioUrl(url);
+      if (audioRef.current) {
+        setTimeout(() => {
+          audioRef.current?.play().catch(e => console.error("Error playing audio:", e));
+        }, 0);
       }
     } catch (err: any) {
       console.error(err);
@@ -297,6 +449,81 @@ const StoryWeaver = () => {
         audioRef.current.play().catch(e => console.error("Error playing audio:", e));
       }
     }
+  };
+
+  const generateQuiz = async () => {
+    if (!storyData || isGeneratingQuiz) return;
+
+    setIsGeneratingQuiz(true);
+    setQuizSubmitted(false);
+    setUserAnswers({});
+    setFillBlankInputs({});
+    setQuizScore(0);
+    setError(null);
+
+    try {
+      const response = await fetch(`${backendUrl}/gemini/generate-quiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        body: JSON.stringify({
+          language,
+          story: storyData.story,
+          vocabulary: storyData.vocabulary,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to generate quiz.');
+      }
+
+      const parsed: QuizData = await response.json();
+      setQuizData(parsed);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to generate quiz.');
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
+  };
+
+  const handleAnswerSelect = (questionId: number, answer: string) => {
+    if (quizSubmitted) return;
+    setUserAnswers(prev => ({ ...prev, [questionId]: answer }));
+  };
+
+  const handleFillBlankChange = (questionId: number, value: string) => {
+    if (quizSubmitted) return;
+    setFillBlankInputs(prev => ({ ...prev, [questionId]: value }));
+  };
+
+  const submitQuiz = () => {
+    if (!quizData) return;
+    let score = 0;
+    quizData.questions.forEach(q => {
+      if (q.type === 'fill_blank') {
+        const userAnswer = (fillBlankInputs[q.id] || '').trim().toLowerCase();
+        if (userAnswer === q.correct_answer.toLowerCase()) score++;
+      } else {
+        if ((userAnswers[q.id] || '').toLowerCase() === q.correct_answer.toLowerCase()) score++;
+      }
+    });
+    setQuizScore(score);
+    setQuizSubmitted(true);
+  };
+
+  const retakeQuiz = () => {
+    setUserAnswers({});
+    setFillBlankInputs({});
+    setQuizSubmitted(false);
+    setQuizScore(0);
+  };
+
+  const isAnswerCorrect = (q: QuizQuestion): boolean => {
+    if (q.type === 'fill_blank') {
+      return (fillBlankInputs[q.id] || '').trim().toLowerCase() === q.correct_answer.toLowerCase();
+    }
+    return (userAnswers[q.id] || '').toLowerCase() === q.correct_answer.toLowerCase();
   };
 
   return (
@@ -352,11 +579,12 @@ const StoryWeaver = () => {
             </div>
 
             {error && <div className="error-message" style={{ color: '#ff6b6b', marginBottom: '1rem', fontSize: '0.875rem', padding: '0.5rem', background: 'rgba(255,107,107,0.1)', borderRadius: '0.25rem' }}>{error}</div>}
+            {success && <div className="success-message" style={{ color: '#51cf66', marginBottom: '1rem', fontSize: '0.875rem', padding: '0.5rem', background: 'rgba(81,207,102,0.1)', borderRadius: '0.25rem' }}>{success}</div>}
 
             <button
               type="submit"
               className={`generate-btn ${isGenerating ? 'generating' : ''}`}
-              disabled={isGenerating || !inputWords.trim() || !apiKey.trim()}
+              disabled={isGenerating || !inputWords.trim()}
             >
               {isGenerating ? (
                 <>
@@ -371,6 +599,59 @@ const StoryWeaver = () => {
               )}
             </button>
           </form>
+
+          {!isLoadingSavedStories && savedStories.length > 0 && (
+            <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1.5rem' }}>
+              <h3 style={{ marginBottom: '1rem', fontSize: '1rem', fontWeight: '600' }}>📚 Saved Stories</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto' }}>
+                {savedStories.map(story => (
+                  <button
+                    key={story.id}
+                    onClick={() => loadStoryFromSaved(story.id)}
+                    style={{
+                      padding: '0.75rem',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '0.5rem',
+                      color: 'white',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: '500' }}>{story.title}</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{story.language}</div>
+                    </div>
+                    <button
+                      onClick={(e) => deleteStory(story.id, e)}
+                      style={{
+                        background: 'rgba(255,107,107,0.2)',
+                        border: 'none',
+                        borderRadius: '0.25rem',
+                        padding: '0.25rem 0.5rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        color: '#ff6b6b'
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {storyData && (
@@ -379,19 +660,26 @@ const StoryWeaver = () => {
               <div className="card-header">
                 <h3><BookOpen size={20} /> {storyData.title}</h3>
 
-                <button className="audio-btn" onClick={toggleAudio} disabled={isGeneratingAudio}>
-                  {isGeneratingAudio ? (
-                    <Loader2 size={18} className="spinner" />
-                  ) : isPlaying ? (
-                    <Pause size={18} />
-                  ) : (
-                    <Play size={18} />
-                  )}
-                  <span>{isGeneratingAudio ? 'Generating...' : isPlaying ? 'Pause' : 'Listen'}</span>
-                  {isPlaying && <div className="audio-waves">
-                    <span></span><span></span><span></span>
-                  </div>}
-                </button>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="audio-btn" onClick={toggleAudio} disabled={isGeneratingAudio}>
+                    {isGeneratingAudio ? (
+                      <Loader2 size={18} className="spinner" />
+                    ) : isPlaying ? (
+                      <Pause size={18} />
+                    ) : (
+                      <Play size={18} />
+                    )}
+                    <span>{isGeneratingAudio ? 'Generating...' : isPlaying ? 'Pause' : 'Listen'}</span>
+                    {isPlaying && <div className="audio-waves">
+                      <span></span><span></span><span></span>
+                    </div>}
+                  </button>
+
+                  <button className="audio-btn" onClick={saveStory} disabled={isSaving} style={{ background: isSaving ? 'rgba(99, 102, 241, 0.5)' : undefined }}>
+                    <Save size={18} />
+                    <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                  </button>
+                </div>
               </div>
 
               {audioUrl && (
@@ -468,6 +756,159 @@ const StoryWeaver = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* Quiz Section */}
+            <div className="quiz-container glass-panel">
+              <div className="card-header border-bottom">
+                <h3><Brain size={20} /> Vocabulary Quiz</h3>
+                <button
+                  className="quiz-generate-btn"
+                  onClick={generateQuiz}
+                  disabled={isGeneratingQuiz}
+                >
+                  {isGeneratingQuiz ? (
+                    <><Loader2 size={16} className="spinner" /> Crafting Quiz...</>
+                  ) : quizData ? (
+                    <><RefreshCw size={16} /> New Quiz</>
+                  ) : (
+                    <><Sparkles size={16} /> Generate Quiz</>
+                  )}
+                </button>
+              </div>
+
+              {!quizData && !isGeneratingQuiz && (
+                <div className="quiz-empty-state">
+                  <Brain size={48} className="quiz-empty-icon" />
+                  <p>Test your memory! Generate a quiz based on the vocabulary words.</p>
+                  <button className="quiz-start-btn" onClick={generateQuiz}>
+                    <Sparkles size={18} /> Generate Quiz
+                  </button>
+                </div>
+              )}
+
+              {isGeneratingQuiz && (
+                <div className="quiz-loading">
+                  <div className="quiz-loading-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <p>Crafting your personalized quiz...</p>
+                </div>
+              )}
+
+              {quizData && !isGeneratingQuiz && (
+                <div className="quiz-content">
+                  {quizSubmitted && (
+                    <div className={`quiz-score-banner ${quizScore === quizData.questions.length ? 'perfect' : quizScore >= quizData.questions.length * 0.7 ? 'great' : 'keep-trying'}`}>
+                      <Trophy size={28} />
+                      <div>
+                        <div className="quiz-score-number">{quizScore} / {quizData.questions.length}</div>
+                        <div className="quiz-score-message">
+                          {quizScore === quizData.questions.length ? '🎉 Perfect! You nailed it!' :
+                           quizScore >= quizData.questions.length * 0.7 ? '🌟 Great job! Keep it up!' :
+                           '💪 Keep practicing — you\'ve got this!'}
+                        </div>
+                      </div>
+                      <button className="quiz-retake-btn" onClick={retakeQuiz}>
+                        <RefreshCw size={16} /> Retake
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="quiz-questions">
+                    {quizData.questions.map((q, idx) => {
+                      const answered = q.type === 'fill_blank'
+                        ? !!fillBlankInputs[q.id]?.trim()
+                        : !!userAnswers[q.id];
+                      const correct = quizSubmitted ? isAnswerCorrect(q) : null;
+
+                      return (
+                        <div
+                          key={q.id}
+                          className={`quiz-question ${quizSubmitted ? (correct ? 'correct' : 'incorrect') : answered ? 'answered' : ''}`}
+                        >
+                          <div className="quiz-question-header">
+                            <span className="quiz-q-number">Q{idx + 1}</span>
+                            <span className={`quiz-type-badge quiz-type-${q.type}`}>
+                              {q.type === 'multiple_choice' ? 'Multiple Choice' :
+                               q.type === 'fill_blank' ? 'Fill in the Blank' : 'True / False'}
+                            </span>
+                            {quizSubmitted && (
+                              correct
+                                ? <CheckCircle2 size={20} className="quiz-result-icon correct-icon" />
+                                : <XCircle size={20} className="quiz-result-icon incorrect-icon" />
+                            )}
+                          </div>
+
+                          <p className="quiz-question-text">{q.question}</p>
+
+                          {q.type === 'fill_blank' ? (
+                            <div className="quiz-fill-blank">
+                              <input
+                                type="text"
+                                placeholder="Type your answer..."
+                                value={fillBlankInputs[q.id] || ''}
+                                onChange={(e) => handleFillBlankChange(q.id, e.target.value)}
+                                disabled={quizSubmitted}
+                                className={`quiz-fill-input ${quizSubmitted ? (correct ? 'input-correct' : 'input-incorrect') : ''}`}
+                              />
+                              {quizSubmitted && !correct && (
+                                <div className="quiz-correct-answer">
+                                  ✓ Correct: <strong>{q.correct_answer}</strong>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="quiz-options">
+                              {q.options?.map((option) => {
+                                const isSelected = userAnswers[q.id] === option;
+                                const isCorrectOption = option.toLowerCase() === q.correct_answer.toLowerCase();
+                                let optionClass = 'quiz-option';
+                                if (quizSubmitted) {
+                                  if (isCorrectOption) optionClass += ' option-correct';
+                                  else if (isSelected && !isCorrectOption) optionClass += ' option-wrong';
+                                } else if (isSelected) {
+                                  optionClass += ' option-selected';
+                                }
+
+                                return (
+                                  <button
+                                    key={option}
+                                    className={optionClass}
+                                    onClick={() => handleAnswerSelect(q.id, option)}
+                                    disabled={quizSubmitted}
+                                  >
+                                    <span className="quiz-option-dot"></span>
+                                    {option}
+                                    {quizSubmitted && isCorrectOption && <CheckCircle2 size={16} className="option-check" />}
+                                    {quizSubmitted && isSelected && !isCorrectOption && <XCircle size={16} className="option-x" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {quizSubmitted && (
+                            <div className={`quiz-explanation ${correct ? 'explanation-correct' : 'explanation-incorrect'}`}>
+                              💡 {q.explanation}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {!quizSubmitted && (
+                    <button
+                      className="quiz-submit-btn"
+                      onClick={submitQuiz}
+                      disabled={quizData.questions.filter(q => q.type === 'fill_blank' ? !fillBlankInputs[q.id]?.trim() : !userAnswers[q.id]).length > 0}
+                    >
+                      <CheckCircle2 size={18} /> Check Answers
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
