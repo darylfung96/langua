@@ -99,3 +99,9 @@
 .module-card:hover .card-action .arrow {
   transform: translateX(5px);
 }
+
+.module-card--coming-soon {
+  opacity: 0.65;
+  cursor: default;
+  pointer-events: none;
+}

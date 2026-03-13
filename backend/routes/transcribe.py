@@ -10,7 +10,8 @@ from fastapi.concurrency import run_in_threadpool
 from faster_whisper import WhisperModel
 import torch
 
-from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE, TEMP_DIR
+from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE, TEMP_DIR, TRANSCRIBE_TIMEOUT
+from database import User
 from security import get_current_user
 from limiter import limiter
 
@@ -36,7 +37,7 @@ async def transcribe(
     request: Request,
     file: UploadFile = File(...),
     language: str = None,
-    api_key: str = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Transcribe audio/video file using Whisper."""
     if file.size and file.size > WHISPER_MAX_UPLOAD_SIZE:
@@ -48,52 +49,54 @@ async def transcribe(
     if not file.filename.lower().endswith(SUPPORTED_FORMATS):
         raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported: {', '.join(SUPPORTED_FORMATS)}")
 
-    tmp_file = tempfile.NamedTemporaryFile(
-        dir=TEMP_DIR,
-        suffix=os.path.splitext(file.filename)[1] or ".tmp",
-        delete=False,
-    )
-    temp_path = tmp_file.name
-    tmp_file.close()
+    file_ext = os.path.splitext(file.filename)[1] or ".tmp"
 
     try:
-        async with asyncio.Lock():
-            with open(temp_path, "wb") as buffer:
-                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
+        # Use a temporary directory that auto-cleans when the context exits
+        with tempfile.TemporaryDirectory(dir=TEMP_DIR) as tmpdir:
+            temp_path = os.path.join(tmpdir, f"audio{file_ext}")
 
-        segments, info = await run_in_threadpool(
-            model.transcribe,
-            temp_path,
-            beam_size=5,
-            language=language if language else None,
-            word_timestamps=True
-        )
+            async with asyncio.Lock():
+                with open(temp_path, "wb") as buffer:
+                    await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
-        all_segments = []
-        all_text_parts = []
+            # Apply timeout to the transcribe operation
+            segments, info = await asyncio.wait_for(
+                run_in_threadpool(
+                    model.transcribe,
+                    temp_path,
+                    beam_size=5,
+                    language=language if language else None,
+                    word_timestamps=True
+                ),
+                timeout=TRANSCRIBE_TIMEOUT
+            )
 
-        for segment in segments:
-            all_segments.append({
-                "id": len(all_segments),
-                "start": round(segment.start, 2),
-                "end": round(segment.end, 2),
-                "text": segment.text.strip()
+            all_segments = []
+            all_text_parts = []
+
+            for segment in segments:
+                all_segments.append({
+                    "id": len(all_segments),
+                    "start": round(segment.start, 2),
+                    "end": round(segment.end, 2),
+                    "text": segment.text.strip()
+                })
+                all_text_parts.append(segment.text.strip())
+
+            full_text = " ".join(all_text_parts)
+
+            return JSONResponse(content={
+                "filename": file.filename,
+                "text": full_text,
+                "segments": all_segments,
+                "language": info.language,
+                "language_probability": info.language_probability
             })
-            all_text_parts.append(segment.text.strip())
 
-        full_text = " ".join(all_text_parts)
-
-        return JSONResponse(content={
-            "filename": file.filename,
-            "text": full_text,
-            "segments": all_segments,
-            "language": info.language,
-            "language_probability": info.language_probability
-        })
-
+    except asyncio.TimeoutError:
+        logger.error("Transcription timed out after %s seconds", TRANSCRIBE_TIMEOUT)
+        raise HTTPException(status_code=504, detail="Transcription timed out. Please try a shorter audio file.")
     except Exception as e:
         logger.error(f"Error during transcription: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
-    finally:
-        if os.path.exists(temp_path):
-            await run_in_threadpool(os.remove, temp_path)

@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from database import get_db, User
 from schemas import ResourceRequest, ResourceDetailResponse, SavedResourceListItem
 from security import get_current_user
+from utils import format_timestamp
 from services.resource_service import (
     save_resource as save_resource_db,
     get_all_resources as get_all_resources_db,
@@ -22,26 +23,22 @@ router = APIRouter(tags=["resources"])
 
 @router.post("")
 async def save_resource(
-    request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    title: str = Form(...),
+    file_name: str = Form(...),
+    file_type: str = Form(...),
+    language: str = Form(...),
+    transcript: str = Form(...),
+    media_file: Optional[UploadFile] = File(None),
 ):
     """Save a transcribed resource with optional media file."""
     try:
-        form_data = await request.form()
-        
-        title = form_data.get('title')
-        file_name = form_data.get('file_name')
-        file_type = form_data.get('file_type')
-        language = form_data.get('language')
-        transcript = form_data.get('transcript')
-        media_file = form_data.get('media_file')
-        
         media_data = None
         if media_file:
             media_data = await media_file.read()
-            validate_media_file(media_data, file_type or "")
-        
+            validate_media_file(media_data, file_type)
+
         resource_data = ResourceRequest(
             title=title,
             file_name=file_name,
@@ -49,14 +46,14 @@ async def save_resource(
             language=language,
             transcript=transcript
         )
-        
+
         resource = save_resource_db(resource_data, db, current_user.id, media_data)
         return JSONResponse(content={
             "id": resource.id,
             "title": resource.title,
             "language": resource.language,
             "media_file_path": resource.media_file_path,
-            "created_at": resource.created_at.isoformat()
+            "created_at": format_timestamp(resource.created_at)
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -69,7 +66,7 @@ async def save_resource(
 async def get_all_resources(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: Optional[int] = Query(None, ge=1, le=200, description="Max records to return"),
+    limit: int = Query(20, ge=1, le=200, description="Max records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
 ):
     """Fetch saved resources with optional pagination."""
@@ -83,8 +80,8 @@ async def get_all_resources(
                     file_name=resource.file_name,
                     language=resource.language,
                     has_media=resource.media_file_path is not None,
-                    created_at=resource.created_at.isoformat(),
-                    updated_at=resource.updated_at.isoformat(),
+                    created_at=format_timestamp(resource.created_at),
+                    updated_at=format_timestamp(resource.updated_at),
                 ).model_dump()
                 for resource in resources
             ],
@@ -92,6 +89,7 @@ async def get_all_resources(
             "offset": offset,
         })
     except Exception as e:
+        logger.error(f"Error fetching resources: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch resources.")
 
 
@@ -108,6 +106,7 @@ async def get_resource(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"Error fetching resource {resource_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch resource.")
 
 

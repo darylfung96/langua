@@ -3,19 +3,19 @@ import os
 import uuid
 import base64
 import logging
+import tempfile
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 
-from config import TEMP_DIR
+from config import TEMP_DIR, AI_REQUEST_TIMEOUT
+from database import User
 from security import get_current_user
-from gemini_client import gemini_client
+from gemini_client import get_gemini_client
 from limiter import limiter
 from utils import generate_creative_prompt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["image-generation"])
-
-_AI_TIMEOUT = 60.0  # seconds
 
 
 @router.post("/generate-image")
@@ -24,24 +24,20 @@ async def generate_image(
     request: Request,
     word: str,
     language: str = "en",
-    api_key: str = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Generate a memorable image for a word in a specific language."""
-    if not gemini_client:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini service is not available. Please configure GEMINI_COOKIE_1PSID and optionally GEMINI_COOKIE_1PSIDTS environment variables."
-        )
-
     if not word or not word.strip():
         raise HTTPException(status_code=400, detail="Word cannot be empty")
 
     try:
         creative_prompt = generate_creative_prompt(word.strip(), language)
 
-        await gemini_client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+        # Get or initialize the Gemini client (lazy initialization)
+        client = await get_gemini_client()
+
         response = await asyncio.wait_for(
-            gemini_client.generate_content(creative_prompt), timeout=_AI_TIMEOUT
+            client.generate_content(creative_prompt), timeout=AI_REQUEST_TIMEOUT
         )
 
         images = []
@@ -51,31 +47,31 @@ async def generate_image(
             text_response = response.text
 
         if hasattr(response, 'images') and response.images:
-            for idx, image in enumerate(response.images):
-                image_data = {
-                    "id": idx,
-                    "type": image.__class__.__name__
-                }
+            # Use a temporary directory that auto-cleans for all image files
+            with tempfile.TemporaryDirectory(dir=TEMP_DIR) as tmpdir:
+                for idx, image in enumerate(response.images):
+                    image_data = {
+                        "id": idx,
+                        "type": image.__class__.__name__
+                    }
 
-                try:
-                    if hasattr(image, 'url'):
-                        image_data["url"] = image.url
+                    try:
+                        if hasattr(image, 'url'):
+                            image_data["url"] = image.url
 
-                    if hasattr(image, 'save'):
-                        temp_filename = f"gemini_image_{uuid.uuid4()}.png"
-                        await image.save(path=TEMP_DIR, filename=temp_filename, verbose=False)
+                        if hasattr(image, 'save'):
+                            temp_filename = f"gemini_image_{uuid.uuid4()}.png"
+                            temp_path = os.path.join(tmpdir, temp_filename)
+                            await image.save(path=tmpdir, filename=temp_filename, verbose=False)
 
-                        full_path = os.path.join(TEMP_DIR, temp_filename)
-                        with open(full_path, "rb") as img_file:
-                            image_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-                            image_data["base64"] = image_base64
+                            with open(temp_path, "rb") as img_file:
+                                image_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+                                image_data["base64"] = image_base64
+                    except Exception as e:
+                        logger.error(f"Error processing image {idx}: {e}")
+                        image_data["error"] = "Failed to process image"
 
-                        os.remove(full_path)
-                except Exception as e:
-                    logger.error(f"Error processing image {idx}: {e}")
-                    image_data["error"] = "Failed to process image"
-
-                images.append(image_data)
+                    images.append(image_data)
 
         return JSONResponse(content={
             "word": word,
@@ -91,6 +87,9 @@ async def generate_image(
         raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Gemini client not configured
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Error during image generation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate image.")

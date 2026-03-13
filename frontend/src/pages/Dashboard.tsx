@@ -12,19 +12,20 @@ const modules = [
     color: 'var(--accent-primary)'
   },
   {
-    title: 'Lyric Learner',
-    description: 'Rhythmic memory. Learn vocabulary and pacing through songs.',
+    title: 'Youtube Learner',
+    description: 'Rhythmic memory. Learn vocabulary and pacing through audios/videos.',
     icon: <Music size={32} />,
     path: '/melody',
     color: 'var(--accent-secondary)'
   },
-  // {
-  //   title: 'Podcast Pro',
-  //   description: 'Acoustic practice. Perfect your pronunciation by shadowing natives.',
-  //   icon: <Mic2 size={32} />,
-  //   path: '/podcasts',
-  //   color: 'var(--accent-warning)'
-  // },
+  {
+    title: 'Podcast Pro',
+    description: 'Acoustic practice. Perfect your pronunciation by shadowing natives.',
+    icon: <Mic2 size={32} />,
+    path: '/podcasts',
+    color: 'var(--accent-warning)',
+    comingSoon: true,
+  },
   {
     title: 'Visual Memory',
     description: 'Spatial and image memory. Connect words to vibrant imagery.',
@@ -32,13 +33,14 @@ const modules = [
     path: '/visual-memory',
     color: 'var(--accent-secondary)'
   },
-  // {
-  //   title: 'Journaling',
-  //   description: 'Expressive writing. Translate constructs and improve syntax.',
-  //   icon: <PenTool size={32} />,
-  //   path: '/writing',
-  //   color: 'var(--accent-tertiary)'
-  // },
+  {
+    title: 'Journaling',
+    description: 'Expressive writing. Translate constructs and improve syntax.',
+    icon: <PenTool size={32} />,
+    path: '/writing',
+    color: 'var(--accent-tertiary)',
+    comingSoon: true,
+  },
   {
     title: 'Resource Learner',
     description: 'Local transcription. Upload audio/video and get a timestamped interactive transcript.',
@@ -58,7 +60,7 @@ const Dashboard = () => {
 
       <div className="dashboard-grid">
         {modules.map((mod, idx) => (
-          <Link to={mod.path} key={idx} className="module-card glass-panel" style={{ '--card-accent': mod.color } as React.CSSProperties}>
+          <Link to={mod.path} key={idx} className={`module-card glass-panel${mod.comingSoon ? ' module-card--coming-soon' : ''}`} style={{ '--card-accent': mod.color } as React.CSSProperties}>
             <div className="card-icon-wrapper" style={{ color: mod.color }}>
               {mod.icon}
             </div>
@@ -67,7 +69,7 @@ const Dashboard = () => {
               <p>{mod.description}</p>
             </div>
             <div className="card-action">
-              <span>Start</span>
+              <span>{mod.comingSoon ? 'Coming Soon' : 'Start'}</span>
               <span className="arrow">→</span>
             </div>
           </Link>

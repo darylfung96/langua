@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Loader, AlertCircle, BookOpen, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import './VisualMemory.css';
+import { apiFetch } from '../utils/apiClient';
 
 interface GeneratedImage {
   id: number;
@@ -45,9 +46,8 @@ const VisualMemory = () => {
   const [selectedVisual, setSelectedVisual] = useState<VisualDetail | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-  const apiKey = import.meta.env.VITE_BACKEND_API_KEY;
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (view === 'library') {
@@ -58,22 +58,11 @@ const VisualMemory = () => {
   const loadVisuals = async () => {
     setLoadingLibrary(true);
     try {
-      const response = await fetch(`${backendUrl}/visuals`, {
-        headers: {
-          'X-API-Key': apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load visuals');
-      }
-
+      const response = await apiFetch('/visuals');
       const data = await response.json();
       setSavedVisuals(data.visuals || []);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load visuals'
-      );
+      setError(err instanceof Error ? err.message : 'Failed to load visuals');
     } finally {
       setLoadingLibrary(false);
     }
@@ -81,22 +70,11 @@ const VisualMemory = () => {
 
   const loadVisualDetail = async (visualId: string) => {
     try {
-      const response = await fetch(`${backendUrl}/visuals/${visualId}`, {
-        headers: {
-          'X-API-Key': apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load visual details');
-      }
-
+      const response = await apiFetch(`/visuals/${visualId}`);
       const data = await response.json();
       setSelectedVisual(data);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load visual details'
-      );
+      setError(err instanceof Error ? err.message : 'Failed to load visual details');
     }
   };
 
@@ -113,31 +91,11 @@ const VisualMemory = () => {
     setImageData(null);
 
     try {
-      if (!apiKey) {
-        setError('API key not found. Please set it in settings.');
-        setLoading(false);
-        return;
-      }
-
-      const params = new URLSearchParams({
-        word: word.trim(),
-        language,
-      });
-
-      const response = await fetch(
-        `${backendUrl}/generate-image?${params}`,
-        {
-          method: 'POST',
-          headers: {
-            'X-API-Key': apiKey,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
-      }
+      const params = new URLSearchParams({ word: word.trim(), language });
+      const response = await apiFetch(`/generate-image?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }, 200_000); // 200s timeout — image generation can take a while
 
       const data: ImageResponse = await response.json();
       if (data.success) {
@@ -161,12 +119,9 @@ const VisualMemory = () => {
     setError('');
 
     try {
-      const response = await fetch(`${backendUrl}/visuals`, {
+      await apiFetch('/visuals', {
         method: 'POST',
-        headers: {
-          'X-API-Key': apiKey,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           word: imageData.word,
           language: imageData.language,
@@ -176,15 +131,11 @@ const VisualMemory = () => {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to save visual');
-      }
-
       setImageData(null);
       setWord('');
       setError('');
-      // Show success message
-      alert('Visual saved successfully!');
+      setSuccessMessage('Visual saved successfully!');
+      setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to save visual'
@@ -195,25 +146,16 @@ const VisualMemory = () => {
   };
 
   const handleDeleteVisual = async (visualId: string) => {
-    if (!confirm('Are you sure you want to delete this visual?')) return;
-
     try {
-      const response = await fetch(`${backendUrl}/visuals/${visualId}`, {
-        method: 'DELETE',
-        headers: {
-          'X-API-Key': apiKey,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete visual');
-      }
+      await apiFetch(`/visuals/${visualId}`, { method: 'DELETE' });
 
       setSavedVisuals(savedVisuals.filter((v) => v.id !== visualId));
       if (selectedVisual?.id === visualId) {
         setSelectedVisual(null);
       }
-      alert('Visual deleted successfully!');
+      setPendingDeleteId(null);
+      setSuccessMessage('Visual deleted!');
+      setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to delete visual'
@@ -315,6 +257,11 @@ const VisualMemory = () => {
                   {error}
                 </div>
               )}
+              {successMessage && (
+                <div className="success-toast">
+                  {successMessage}
+                </div>
+              )}
 
               {imageData && (
                 <div className="image-result">
@@ -410,13 +357,21 @@ const VisualMemory = () => {
                     <p className="created-date">
                       Created: {new Date(selectedVisual.created_at).toLocaleDateString()}
                     </p>
-                    <button
-                      className="delete-btn"
-                      onClick={() => handleDeleteVisual(selectedVisual.id)}
-                    >
-                      <Trash2 size={18} />
-                      Delete
-                    </button>
+                    {pendingDeleteId === selectedVisual.id ? (
+                      <div className="confirm-delete-inline">
+                        <span>Delete this visual?</span>
+                        <button className="confirm-yes-btn" onClick={() => handleDeleteVisual(selectedVisual.id)}>Yes, delete</button>
+                        <button className="confirm-no-btn" onClick={() => setPendingDeleteId(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button
+                        className="delete-btn"
+                        onClick={() => setPendingDeleteId(selectedVisual.id)}
+                      >
+                        <Trash2 size={18} />
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (

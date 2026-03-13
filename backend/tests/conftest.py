@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from database import Base, get_db
 from main import app
+from limiter import limiter
 
 # ---------------------------------------------------------------------------
 # In-memory SQLite database — isolated per test session
@@ -63,6 +64,16 @@ async def client(override_db):
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset rate limiter storage before each test to avoid rate limit hits."""
+    # Clear the in-memory storage used by slowapi/limits
+    # The MemoryStorage stores counters in the .storage attribute (a Counter)
+    if hasattr(limiter, '_storage') and hasattr(limiter._storage, 'storage'):
+        limiter._storage.storage.clear()
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Helper fixtures — pre-registered users and their tokens
 # ---------------------------------------------------------------------------
@@ -105,11 +116,22 @@ SAMPLE_VOCABULARY = json.dumps([
     {"word": "gato", "meaning_in_target": "un animal", "equivalent_in_english": "cat"}
 ])
 
+def resource_payload(**overrides) -> dict:
+    base = {
+        "title": "Test Podcast",
+        "file_name": "test.mp3",
+        "file_type": "audio/mpeg",
+        "language": "fr",  # BCP 47 language code
+        "transcript": json.dumps([{"id": 0, "start": 0.0, "end": 2.0, "text": "Bonjour"}]),
+    }
+    return {**base, **overrides}
+
+
 def story_payload(**overrides) -> dict:
     base = {
         "title": "El Gato",
         "story_content": "El gato es bonito.",
-        "language": "Spanish",
+        "language": "es",  # BCP 47 language code
         "vocabulary": SAMPLE_VOCABULARY,
     }
     return {**base, **overrides}
@@ -118,8 +140,8 @@ def story_payload(**overrides) -> dict:
 def lyric_payload(**overrides) -> dict:
     base = {
         "title": "Test Song",
-        "video_id": "abc123",
-        "language": "French",
+        "video_id": "abcdefghijk",  # valid YouTube video ID format (11 chars)
+        "language": "fr",  # BCP 47 language code
         "transcript": json.dumps([{"id": 0, "start": 0.0, "end": 1.0, "text": "Bonjour"}]),
     }
     return {**base, **overrides}
@@ -128,7 +150,7 @@ def lyric_payload(**overrides) -> dict:
 def visual_payload(**overrides) -> dict:
     base = {
         "word": "neko",
-        "language": "Japanese",
+        "language": "ja",  # BCP 47 language code
         "images": json.dumps([]),
         "prompt": "A cute cat",
     }

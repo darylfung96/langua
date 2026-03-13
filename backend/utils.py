@@ -1,22 +1,39 @@
 import re
+from datetime import datetime, timezone
+from typing import Optional
+
+
+_TIMESTAMP_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc).isoformat()
+
+
+def format_timestamp(dt: Optional[datetime]) -> str:
+    """Format a datetime as ISO 8601. Returns Unix epoch string if dt is None."""
+    return dt.isoformat() if dt is not None else _TIMESTAMP_EPOCH
 
 
 def extract_video_id(youtube_url: str) -> str:
     """Extracts the video ID from a YouTube URL or returns the input if it looks like an ID."""
     if len(youtube_url) == 11 and re.match(r"^[0-9A-Za-z_-]{11}$", youtube_url):
         return youtube_url
-    
+
     patterns = [
         r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?\/]|$)",  # watch?v=ID, /v/ID, /embed/ID
         r"youtu\.be\/([0-9A-Za-z_-]{11})(?:[&?\/]|$)"  # youtu.be/ID
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, youtube_url)
         if match:
             return match.group(1)
-    
+
     return None
+
+
+def validate_video_id(video_id: str) -> bool:
+    """Validate that a YouTube video ID is properly formatted."""
+    if not video_id:
+        return False
+    return len(video_id) == 11 and bool(re.fullmatch(r"[0-9A-Za-z_-]{11}", video_id))
 
 
 def generate_creative_prompt(word: str, language: str) -> str:

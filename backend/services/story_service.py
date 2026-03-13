@@ -11,25 +11,23 @@ from services.base_service import BaseService
 logger = logging.getLogger(__name__)
 
 
+MAX_AUDIO_BASE64_BYTES = 70_000_000  # ~50 MB binary after base64 encoding (base64 ≈ 1.37× input)
+
+
 class StoryService(BaseService[Story]):
     model = Story
 
     def save(self, story_data: StoryRequest, db: Session, user_id: str) -> Story:
-        """Save a story to the database."""
+        """Save a story to the database atomically.
+
+        File is written only after the DB row is validated (flushed), so a DB
+        error won't leave an orphaned file on disk.
+        """
         try:
             json.loads(story_data.vocabulary)  # validate JSON
 
-            audio_file_path = None
-            if story_data.audio:
-                # Max base64 size check: 50 MB raw → ~67 MB base64
-                if len(story_data.audio) > 70_000_000:
-                    raise ValueError("Audio file too large (maximum 50 MB)")
-                try:
-                    audio_bytes = base64.b64decode(story_data.audio)
-                    audio_file_path = save_media_file(audio_bytes, "audio.mp3")
-                except Exception as e:
-                    logger.error(f"Error saving audio file: {e}")
-                    # Continue saving story even if audio save fails
+            if story_data.audio and len(story_data.audio) > MAX_AUDIO_BASE64_BYTES:
+                raise ValueError("Audio file too large (maximum 50 MB)")
 
             story = Story(
                 user_id=user_id,
@@ -38,9 +36,22 @@ class StoryService(BaseService[Story]):
                 language=story_data.language,
                 vocabulary=story_data.vocabulary,
                 quiz=story_data.quiz,
-                audio_file_path=audio_file_path,
+                audio_file_path=None,
             )
             db.add(story)
+            db.flush()  # Validate DB constraints before touching the filesystem
+
+            audio_file_path = None
+            if story_data.audio:
+                try:
+                    audio_bytes = base64.b64decode(story_data.audio)
+                    audio_file_path = save_media_file(audio_bytes, "audio.mp3")
+                    story.audio_file_path = audio_file_path
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"Error saving audio file: {e}", exc_info=True)
+                    raise ValueError(f"Failed to process audio: {str(e)[:100]}")
+
             db.commit()
             db.refresh(story)
             return story
@@ -52,7 +63,9 @@ class StoryService(BaseService[Story]):
             raise
         except Exception as e:
             db.rollback()
-            logger.error(f"Error saving story: {e}")
+            if 'audio_file_path' in locals() and audio_file_path:
+                delete_media_file(audio_file_path)
+            logger.error(f"Error saving story: {e}", exc_info=True)
             raise
 
     def _pre_delete(self, record: Story) -> None:

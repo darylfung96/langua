@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Sparkles, Play, Pause, BookOpen, Volume2, Loader2, Save, Trash2, Brain, RefreshCw, CheckCircle2, XCircle, Trophy } from 'lucide-react';
 import './StoryWeaver.css';
+import { apiFetch } from '../utils/apiClient';
+
+const AUDIO_SAMPLE_RATE = 24000;
+const TOAST_TIMEOUT_MS = 2000;
 
 interface VocabWord {
   word: string;
@@ -35,7 +39,7 @@ interface QuizData {
   questions: QuizQuestion[];
 }
 
-const createWavUrl = (base64Data: string, sampleRate = 24000) => {
+const createWavUrl = (base64Data: string, sampleRate = AUDIO_SAMPLE_RATE) => {
   const binaryString = atob(base64Data);
   const pcmData = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
@@ -77,10 +81,22 @@ const createWavUrl = (base64Data: string, sampleRate = 24000) => {
   return URL.createObjectURL(blob);
 };
 
+const LANGUAGES = {
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh-CN': 'Chinese (Simplified)',
+  'zh-TW': 'Chinese (Traditional)',
+  'ru': 'Russian',
+  'pt': 'Portuguese',
+  'ar': 'Arabic',
+} as const;
+
 const StoryWeaver = () => {
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-  const backendApiKey = import.meta.env.VITE_BACKEND_API_KEY;
-  const [language, setLanguage] = useState('French');
+  const [language, setLanguage] = useState('fr');
   const [inputWords, setInputWords] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [storyData, setStoryData] = useState<StoryResponse | null>(null);
@@ -89,6 +105,7 @@ const StoryWeaver = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [savedStories, setSavedStories] = useState<SavedStory[]>([]);
   const [isLoadingSavedStories, setIsLoadingSavedStories] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // Quiz state
   const [quizData, setQuizData] = useState<QuizData | null>(null);
@@ -114,15 +131,13 @@ const StoryWeaver = () => {
   const loadSavedStories = async () => {
     setIsLoadingSavedStories(true);
     try {
-      const response = await fetch(`${backendUrl}/stories`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
+      const response = await apiFetch('/stories');
       if (response.ok) {
         const data = await response.json();
         setSavedStories(data.stories);
       }
-    } catch (err) {
-      console.error('Failed to load saved stories:', err);
+    } catch {
+      // silently fail — saved stories list is a convenience
     } finally {
       setIsLoadingSavedStories(false);
     }
@@ -140,37 +155,25 @@ const StoryWeaver = () => {
 
       // Extract base64 audio if available
       if (audioUrl) {
-        console.log('Audio URL exists:', audioUrl.substring(0, 50));
         if (audioUrl.startsWith('data:')) {
-          // Extract base64 from data URL
           audioData = audioUrl.split(',')[1];
-          console.log('Extracted base64 audio, length:', audioData?.length);
         } else if (audioUrl.startsWith('blob:')) {
-          // Convert blob URL to base64
           const response = await fetch(audioUrl);
           const blob = await response.blob();
           audioData = await new Promise<string>((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => {
               const base64 = (reader.result as string).split(',')[1];
-              console.log('Converted blob to base64, length:', base64.length);
               resolve(base64);
             };
             reader.readAsDataURL(blob);
           });
         }
-      } else {
-        console.log('No audio URL available for saving');
       }
 
-      console.log('Saving story with audio:', audioData ? 'yes' : 'no');
-
-      const saveResponse = await fetch(`${backendUrl}/stories`, {
+      const saveResponse = await apiFetch('/stories', {
         method: 'POST',
-        headers: {
-          'X-API-Key': backendApiKey,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: `${storyData.title} (${inputWords})`,
           story_content: storyData.story,
@@ -185,9 +188,9 @@ const StoryWeaver = () => {
         throw new Error('Failed to save story');
       }
 
-      const savedData = await saveResponse.json();
+      await saveResponse.json();
       setSuccess('Story saved successfully!');
-      setTimeout(() => setSuccess(null), 2000);
+      setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS);
 
       // Reload saved stories
       loadSavedStories();
@@ -200,20 +203,16 @@ const StoryWeaver = () => {
 
   const loadStoryFromSaved = async (storyId: string) => {
     try {
-      const response = await fetch(`${backendUrl}/stories/${storyId}`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load story');
-      }
-
+      const response = await apiFetch(`/stories/${storyId}`);
+      if (!response.ok) throw new Error('Failed to load story');
       const data = await response.json();
       setStoryData({
         title: data.title,
         story: data.story_content,
         vocabulary: data.vocabulary
       });
+      // Set language to match the saved story
+      setLanguage(data.language);
       // Load quiz if saved
       if (data.quiz) {
         setQuizData(data.quiz);
@@ -226,8 +225,13 @@ const StoryWeaver = () => {
       }
       // Set audio URL from saved data if available
       if (data.audio_file_path) {
-        const audioUrl = `${backendUrl}/${data.audio_file_path}`;
-        setAudioUrl(audioUrl);
+        apiFetch(`/${data.audio_file_path}`)
+          .then(res => {
+            if (!res.ok) throw new Error('Failed to load audio');
+            return res.blob();
+          })
+          .then(blob => setAudioUrl(URL.createObjectURL(blob)))
+          .catch(() => setAudioUrl(null));
       } else {
         setAudioUrl(null);
       }
@@ -241,18 +245,13 @@ const StoryWeaver = () => {
 
   const deleteStory = async (storyId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this story?')) return;
-
+    if (pendingDeleteId !== storyId) {
+      setPendingDeleteId(storyId);
+      return;
+    }
+    setPendingDeleteId(null);
     try {
-      const response = await fetch(`${backendUrl}/stories/${storyId}`, {
-        method: 'DELETE',
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete story');
-      }
-
+      await apiFetch(`/stories/${storyId}`, { method: 'DELETE' });
       loadSavedStories();
     } catch (err) {
       setError('Failed to delete story');
@@ -373,9 +372,9 @@ const StoryWeaver = () => {
     setQuizScore(0);
 
     try {
-      const response = await fetch(`${backendUrl}/gemini/generate-story`, {
+      const response = await apiFetch('/gemini/generate-story', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ language, words: inputWords }),
       });
 
@@ -386,9 +385,8 @@ const StoryWeaver = () => {
 
       const parsedData = await response.json();
       setStoryData(parsedData);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'An error occurred while generating the story.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred while generating the story.');
     } finally {
       setIsGenerating(false);
     }
@@ -401,15 +399,15 @@ const StoryWeaver = () => {
     setError(null);
 
     try {
-      const response = await fetch(`${backendUrl}/gemini/generate-audio`, {
+      const response = await apiFetch('/gemini/generate-audio', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           language,
           title: storyData.title,
           story: storyData.story,
         }),
-      });
+      }, 200_000);
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -430,9 +428,8 @@ const StoryWeaver = () => {
           audioRef.current?.play().catch(e => console.error("Error playing audio:", e));
         }, 0);
       }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'An error occurred while generating audio.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred while generating audio.');
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -462,9 +459,9 @@ const StoryWeaver = () => {
     setError(null);
 
     try {
-      const response = await fetch(`${backendUrl}/gemini/generate-quiz`, {
+      const response = await apiFetch('/gemini/generate-quiz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendApiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           language,
           story: storyData.story,
@@ -479,9 +476,8 @@ const StoryWeaver = () => {
 
       const parsed: QuizData = await response.json();
       setQuizData(parsed);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to generate quiz.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate quiz.');
     } finally {
       setIsGeneratingQuiz(false);
     }
@@ -555,15 +551,15 @@ const StoryWeaver = () => {
                   cursor: 'pointer'
                 }}
               >
-                <option value="Spanish" style={{ color: 'black' }}>Spanish</option>
-                <option value="French" style={{ color: 'black' }}>French</option>
-                <option value="German" style={{ color: 'black' }}>German</option>
-                <option value="Italian" style={{ color: 'black' }}>Italian</option>
-                <option value="Japanese" style={{ color: 'black' }}>Japanese</option>
-                <option value="Korean" style={{ color: 'black' }}>Korean</option>
-                <option value="Chinese" style={{ color: 'black' }}>Chinese</option>
-                <option value="Russian" style={{ color: 'black' }}>Russian</option>
-                <option value="Portuguese" style={{ color: 'black' }}>Portuguese</option>
+                <option value="es" style={{ color: 'black' }}>Spanish</option>
+                <option value="fr" style={{ color: 'black' }}>French</option>
+                <option value="de" style={{ color: 'black' }}>German</option>
+                <option value="it" style={{ color: 'black' }}>Italian</option>
+                <option value="ja" style={{ color: 'black' }}>Japanese</option>
+                <option value="ko" style={{ color: 'black' }}>Korean</option>
+                <option value="zh-CN" style={{ color: 'black' }}>Chinese (Simplified)</option>
+                <option value="ru" style={{ color: 'black' }}>Russian</option>
+                <option value="pt" style={{ color: 'black' }}>Portuguese</option>
               </select>
             </div>
             <div className="input-group">
@@ -630,22 +626,26 @@ const StoryWeaver = () => {
                   >
                     <div>
                       <div style={{ fontSize: '0.9rem', fontWeight: '500' }}>{story.title}</div>
-                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{story.language}</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>
+                        {LANGUAGES[story.language as keyof typeof LANGUAGES] || story.language}
+                      </div>
                     </div>
                     <button
                       onClick={(e) => deleteStory(story.id, e)}
                       style={{
-                        background: 'rgba(255,107,107,0.2)',
+                        background: pendingDeleteId === story.id ? 'rgba(255,107,107,0.5)' : 'rgba(255,107,107,0.2)',
                         border: 'none',
                         borderRadius: '0.25rem',
                         padding: '0.25rem 0.5rem',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        color: '#ff6b6b'
+                        color: '#ff6b6b',
+                        fontSize: pendingDeleteId === story.id ? '0.7rem' : undefined,
                       }}
+                      title={pendingDeleteId === story.id ? 'Click again to confirm delete' : 'Delete'}
                     >
-                      <Trash2 size={14} />
+                      {pendingDeleteId === story.id ? 'Confirm?' : <Trash2 size={14} />}
                     </button>
                   </button>
                 ))}
@@ -734,7 +734,7 @@ const StoryWeaver = () => {
                   <thead>
                     <tr>
                       <th>Original Word</th>
-                      <th>Meaning in {language}</th>
+                      <th>Meaning in {LANGUAGES[language as keyof typeof LANGUAGES] || language}</th>
                       <th>Equivalent Word in English</th>
                     </tr>
                   </thead>
@@ -805,8 +805,8 @@ const StoryWeaver = () => {
                         <div className="quiz-score-number">{quizScore} / {quizData.questions.length}</div>
                         <div className="quiz-score-message">
                           {quizScore === quizData.questions.length ? '🎉 Perfect! You nailed it!' :
-                           quizScore >= quizData.questions.length * 0.7 ? '🌟 Great job! Keep it up!' :
-                           '💪 Keep practicing — you\'ve got this!'}
+                            quizScore >= quizData.questions.length * 0.7 ? '🌟 Great job! Keep it up!' :
+                              '💪 Keep practicing — you\'ve got this!'}
                         </div>
                       </div>
                       <button className="quiz-retake-btn" onClick={retakeQuiz}>
@@ -831,7 +831,7 @@ const StoryWeaver = () => {
                             <span className="quiz-q-number">Q{idx + 1}</span>
                             <span className={`quiz-type-badge quiz-type-${q.type}`}>
                               {q.type === 'multiple_choice' ? 'Multiple Choice' :
-                               q.type === 'fill_blank' ? 'Fill in the Blank' : 'True / False'}
+                                q.type === 'fill_blank' ? 'Fill in the Blank' : 'True / False'}
                             </span>
                             {quizSubmitted && (
                               correct

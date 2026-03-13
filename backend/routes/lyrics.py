@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from database import get_db, User
 from schemas import LyricRequest, LyricDetailResponse, SavedLyricListItem
 from security import get_current_user
+from utils import format_timestamp
 from services.lyric_service import (
     save_lyric as save_lyric_db,
     get_all_lyrics as get_all_lyrics_db,
@@ -32,7 +32,7 @@ async def save_lyric(
             "id": lyric.id,
             "title": lyric.title,
             "language": lyric.language,
-            "created_at": lyric.created_at.isoformat()
+            "created_at": format_timestamp(lyric.created_at)
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -45,7 +45,7 @@ async def save_lyric(
 async def get_all_lyrics(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: Optional[int] = Query(None, ge=1, le=200, description="Max records to return"),
+    limit: int = Query(20, ge=1, le=200, description="Max records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
 ):
     """Fetch saved lyrics with optional pagination."""
@@ -57,8 +57,8 @@ async def get_all_lyrics(
                     id=lyric.id,
                     title=lyric.title,
                     language=lyric.language,
-                    created_at=lyric.created_at.isoformat(),
-                    updated_at=lyric.updated_at.isoformat(),
+                    created_at=format_timestamp(lyric.created_at),
+                    updated_at=format_timestamp(lyric.updated_at),
                 ).model_dump()
                 for lyric in lyrics
             ],
@@ -66,6 +66,7 @@ async def get_all_lyrics(
             "offset": offset,
         })
     except Exception as e:
+        logger.error(f"Error fetching lyrics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch lyrics.")
 
 
@@ -82,6 +83,7 @@ async def get_lyric(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"Error fetching lyric {lyric_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch lyric.")
 
 

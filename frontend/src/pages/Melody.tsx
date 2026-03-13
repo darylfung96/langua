@@ -3,7 +3,10 @@ import ReactPlayer from 'react-player';
 import { YoutubeTranscript } from '../utils/YoutubeTranscript';
 import type { TranscriptSection } from '../utils/YoutubeTranscript';
 import { Search, Loader2, Music, Youtube, Play, ExternalLink, Save, Trash2 } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
 import './Melody.css';
+
+const TOAST_TIMEOUT_MS = 2000;
 
 interface SavedLyric {
   id: string;
@@ -23,15 +26,12 @@ const Melody = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedLyrics, setSavedLyrics] = useState<SavedLyric[]>([]);
-  const [isLoadingSavedLyrics, setIsLoadingSavedLyrics] = useState(false);
   const [videoTitle, setVideoTitle] = useState('');
   const [language, setLanguage] = useState('en');
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<ReactPlayer>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
-
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-  const backendApiKey = import.meta.env.VITE_BACKEND_API_KEY;
 
   // Load saved lyrics on mount
   useEffect(() => {
@@ -39,25 +39,19 @@ const Melody = () => {
   }, []);
 
   const loadSavedLyrics = async () => {
-    setIsLoadingSavedLyrics(true);
     try {
-      const response = await fetch(`${backendUrl}/lyrics`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
+      const response = await apiFetch('/lyrics');
       if (response.ok) {
         const data = await response.json();
         setSavedLyrics(data.lyrics);
       }
     } catch (err) {
-      console.error('Failed to load saved lyrics:', err);
-    } finally {
-      setIsLoadingSavedLyrics(false);
+      setError('Failed to load saved lyrics');
     }
   };
 
   const handleFetch = async () => {
     const id = YoutubeTranscript.extractVideoId(url);
-    console.log("VIDEO ID:", id);
 
     if (!id) {
       setError('Invalid YouTube URL');
@@ -66,14 +60,20 @@ const Melody = () => {
 
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     setVideoId(id);
 
     try {
-      const data = await YoutubeTranscript.fetchTranscript(id);
+      const requestedLang = language;
+      const data = await YoutubeTranscript.fetchTranscript(id, requestedLang);
       setTranscript(data.segments);
       setLanguage(data.language);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch transcript. Ensure the video has subtitles.');
+      if (data.language !== requestedLang) {
+        setSuccess(`No ${requestedLang.toUpperCase()} subtitles found — showing ${data.language.toUpperCase()} instead.`);
+        setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS * 3);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch transcript. Ensure the video has subtitles.');
       setTranscript([]);
     } finally {
       setIsLoading(false);
@@ -88,26 +88,19 @@ const Melody = () => {
     setSuccess(null);
 
     try {
-      const saveResponse = await fetch(`${backendUrl}/lyrics`, {
+      await apiFetch('/lyrics', {
         method: 'POST',
-        headers: {
-          'X-API-Key': backendApiKey,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: videoTitle || `Video ${videoId}`,
           video_id: videoId,
           language: language,
-          transcript: JSON.stringify(transcript)
-        })
+          transcript: JSON.stringify(transcript),
+        }),
       });
 
-      if (!saveResponse.ok) {
-        throw new Error('Failed to save lyric');
-      }
-
       setSuccess('Lyrics saved successfully!');
-      setTimeout(() => setSuccess(null), 2000);
+      setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS);
 
       // Reload saved lyrics
       loadSavedLyrics();
@@ -120,14 +113,7 @@ const Melody = () => {
 
   const loadLyricFromSaved = async (lyricId: string) => {
     try {
-      const response = await fetch(`${backendUrl}/lyrics/${lyricId}`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load lyric');
-      }
-
+      const response = await apiFetch(`/lyrics/${lyricId}`);
       const data = await response.json();
       setVideoId(data.video_id);
       setTranscript(data.transcript);
@@ -142,18 +128,15 @@ const Melody = () => {
 
   const deleteLyric = async (lyricId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this lyric?')) return;
-
+    if (pendingDeleteId !== lyricId) {
+      setPendingDeleteId(lyricId);
+      return;
+    }
+    setPendingDeleteId(null);
     try {
-      const response = await fetch(`${backendUrl}/lyrics/${lyricId}`, {
-        method: 'DELETE',
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete lyric');
-      }
-
+      await apiFetch(`/lyrics/${lyricId}`, { method: 'DELETE' });
+      setSuccess('Lyric deleted!');
+      setTimeout(() => setSuccess(null), 2000);
       loadSavedLyrics();
     } catch (err) {
       setError('Failed to delete lyric');
@@ -204,8 +187,8 @@ const Melody = () => {
             <Music size={24} />
           </div>
           <div>
-            <h2 className="title-gradient">Lyric Learner</h2>
-            <p className="subtitle">Master vocabulary and rhythm through your favorite YouTube tracks.</p>
+            <h2 className="title-gradient">YouTube Learner</h2>
+            <p className="subtitle">Master vocabulary and rhythm through your favorite YouTube tracks/videos.</p>
           </div>
         </div>
       </header>
@@ -216,10 +199,31 @@ const Melody = () => {
             type="text"
             className="video-input"
             placeholder="Paste YouTube video URL here..."
+            aria-label="YouTube video URL"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleFetch()}
           />
+          <select
+            className="language-select"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            title="Select transcript language"
+            aria-label="Transcript language"
+          >
+            <option value="en">English</option>
+            <option value="fr">French</option>
+            <option value="ja">Japanese</option>
+            <option value="zh-TW">Chinese (Traditional)</option>
+            <option value="zh-CN">Chinese (Simplified)</option>
+            <option value="ko">Korean</option>
+            <option value="es">Spanish</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+            <option value="ru">Russian</option>
+            <option value="ar">Arabic</option>
+          </select>
           <button
             className="fetch-btn"
             onClick={handleFetch}
@@ -250,6 +254,7 @@ const Melody = () => {
             <input
               type="text"
               placeholder="Give this lyric a title (optional)"
+              aria-label="Lyric title"
               value={videoTitle}
               onChange={(e) => setVideoTitle(e.target.value)}
               style={{ flex: 1, padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
@@ -371,25 +376,39 @@ const Melody = () => {
                   <p style={{ margin: '0.5rem 0', fontSize: '0.75rem', opacity: 0.5 }}>
                     {new Date(lyric.created_at).toLocaleDateString()}
                   </p>
-                  <button
-                    onClick={(e) => deleteLyric(lyric.id, e)}
-                    style={{
-                      marginTop: '0.5rem',
-                      background: '#ef4444',
-                      color: 'white',
-                      border: 'none',
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                      fontSize: '0.75rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.25rem'
-                    }}
-                  >
-                    <Trash2 size={12} />
-                    Delete
-                  </button>
+                  {pendingDeleteId === lyric.id ? (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.75rem' }}>Delete this lyric?</span>
+                      <button
+                        onClick={(e) => deleteLyric(lyric.id, e)}
+                        style={{ background: '#ef4444', color: 'white', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.75rem' }}
+                      >Yes, delete</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPendingDeleteId(null); }}
+                        style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.75rem' }}
+                      >Cancel</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => deleteLyric(lyric.id, e)}
+                      style={{
+                        marginTop: '0.5rem',
+                        background: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '0.25rem',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.25rem'
+                      }}
+                    >
+                      <Trash2 size={12} />
+                      Delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

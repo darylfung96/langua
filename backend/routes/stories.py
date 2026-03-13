@@ -2,11 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
-from typing import Optional
 
 from database import get_db, User
 from schemas import StoryRequest, StoryDetailResponse, SavedStoryListItem
 from security import get_current_user
+from utils import format_timestamp
 from services.story_service import (
     save_story as save_story_db,
     get_all_stories as get_all_stories_db,
@@ -31,7 +31,7 @@ async def save_story(
             "id": story.id,
             "title": story.title,
             "language": story.language,
-            "created_at": story.created_at.isoformat()
+            "created_at": format_timestamp(story.created_at)
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -44,7 +44,7 @@ async def save_story(
 async def get_all_stories(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: Optional[int] = Query(None, ge=1, le=200, description="Max records to return"),
+    limit: int = Query(20, ge=1, le=200, description="Max records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
 ):
     """Fetch saved stories with optional pagination."""
@@ -56,8 +56,8 @@ async def get_all_stories(
                     id=story.id,
                     title=story.title,
                     language=story.language,
-                    created_at=story.created_at.isoformat(),
-                    updated_at=story.updated_at.isoformat(),
+                    created_at=format_timestamp(story.created_at),
+                    updated_at=format_timestamp(story.updated_at),
                 ).model_dump()
                 for story in stories
             ],
@@ -65,6 +65,7 @@ async def get_all_stories(
             "offset": offset,
         })
     except Exception as e:
+        logger.error(f"Error fetching stories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch stories.")
 
 
@@ -81,6 +82,7 @@ async def get_story(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"Error fetching story {story_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch story.")
 
 

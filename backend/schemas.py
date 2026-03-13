@@ -1,9 +1,48 @@
 import json
-from pydantic import BaseModel, field_validator, EmailStr, Field
+import re
+from pydantic import BaseModel, field_validator, EmailStr, Field, model_validator
 from typing import Any, List, Optional
 
-# Maximum base64-encoded audio size (~67 MB encodes to ~90 MB base64)
+# Use shared constants
+from constants import (
+    MAX_TITLE_LENGTH,
+    MAX_STORY_CONTENT_LENGTH,
+    MAX_LANGUAGE_LENGTH,
+    MAX_WORD_LENGTH,
+    MAX_PROMPT_LENGTH,
+    MAX_EXPLANATION_LENGTH,
+    MAX_AUDIO_BASE64_LENGTH,
+    MAX_VIDEO_ID_LENGTH,
+    MAX_FILE_NAME_LENGTH,
+    MAX_FILE_TYPE_LENGTH,
+    LANGUAGE_PATTERN,
+)
+
+# Maximum base64-encoded audio size (overrides constant if needed)
 _MAX_AUDIO_B64_CHARS = 90_000_000
+
+# Language code validation regex
+_language_regex = re.compile(LANGUAGE_PATTERN)
+
+def _validate_language(v: str) -> str:
+    """Validate language code format (BCP 47 basic)."""
+    if not v:
+        raise ValueError("Language is required")
+    if not _language_regex.match(v):
+        raise ValueError(f"Invalid language format: {v}. Use format like 'en', 'en-US', 'zh-CN'")
+    return v
+
+def _sanitize_html(v: str) -> str:
+    """Basic HTML sanitization - strips script tags and event handlers."""
+    if not v:
+        return v
+    # Remove script tags
+    v = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', v, flags=re.IGNORECASE | re.DOTALL)
+    # Remove event handlers like onclick, onerror, etc.
+    v = re.sub(r'\s+on\w+\s*=\s*["\'][^"\']*["\']', '', v, flags=re.IGNORECASE)
+    # Remove javascript: URLs
+    v = re.sub(r'javascript\s*:', '', v, flags=re.IGNORECASE)
+    return v
 
 
 class VocabWord(BaseModel):
@@ -29,6 +68,7 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    csrf_token: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -49,36 +89,91 @@ class UserResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class StoryRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    story_content: str = Field(min_length=1, max_length=100_000)
-    language: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
+    story_content: str = Field(min_length=1, max_length=MAX_STORY_CONTENT_LENGTH)
+    language: str = Field(min_length=1, max_length=MAX_LANGUAGE_LENGTH)
     vocabulary: str = Field(min_length=2)  # at least "[]"
     quiz: Optional[str] = None
-    audio: Optional[str] = Field(default=None, max_length=_MAX_AUDIO_B64_CHARS)
+    audio: Optional[str] = Field(default=None, max_length=MAX_AUDIO_BASE64_LENGTH)
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("story_content")
+    @classmethod
+    def sanitize_story_content(cls, v: str) -> str:
+        """Sanitize HTML to prevent XSS if content is rendered in frontend."""
+        return _sanitize_html(v)
 
 
 class LyricRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    video_id: str = Field(min_length=1, max_length=50)
-    language: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
+    video_id: str = Field(min_length=1, max_length=MAX_VIDEO_ID_LENGTH)
+    language: str = Field(min_length=1, max_length=MAX_LANGUAGE_LENGTH)
     transcript: str = Field(min_length=2)  # at least "[]"
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("video_id")
+    @classmethod
+    def validate_video_id_format(cls, v: str) -> str:
+        from utils import validate_video_id
+        if not validate_video_id(v):
+            raise ValueError("Invalid YouTube video ID format")
+        return v
 
 
 class ResourceRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    file_name: str = Field(min_length=1, max_length=255)
-    file_type: str = Field(min_length=1, max_length=100)
-    language: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
+    file_name: str = Field(min_length=1, max_length=MAX_FILE_NAME_LENGTH)
+    file_type: str = Field(min_length=1, max_length=MAX_FILE_TYPE_LENGTH)
+    language: str = Field(min_length=1, max_length=MAX_LANGUAGE_LENGTH)
     transcript: str = Field(min_length=2)  # at least "[]"
     media_file_path: Optional[str] = None
 
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("file_name")
+    @classmethod
+    def validate_file_name(cls, v: str) -> str:
+        # Prevent path traversal and ensure safe filename
+        if '..' in v or '/' in v or '\\' in v:
+            raise ValueError("Invalid file name")
+        return v
+
 
 class VisualRequest(BaseModel):
-    word: str = Field(min_length=1, max_length=200)
-    language: str = Field(min_length=1, max_length=100)
+    word: str = Field(min_length=1, max_length=MAX_WORD_LENGTH)
+    language: str = Field(min_length=1, max_length=MAX_LANGUAGE_LENGTH)
     images: str = Field(min_length=2)  # at least "[]"
-    prompt: str = Field(min_length=1, max_length=5_000)
-    explanation: Optional[str] = Field(default=None, max_length=10_000)
+    prompt: str = Field(min_length=1, max_length=MAX_PROMPT_LENGTH)
+    explanation: Optional[str] = Field(default=None, max_length=MAX_EXPLANATION_LENGTH)
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("word")
+    @classmethod
+    def validate_word(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Word cannot be empty")
+        # Limit word length (already via Field, but add content check)
+        if len(v) > 100:
+            raise ValueError("Word is too long (max 100 characters)")
+        # Prevent HTML/script in word
+        if re.search(r'[<>"\'&]', v):
+            raise ValueError("Word contains invalid characters")
+        return v.strip()
 
 
 # ---------------------------------------------------------------------------

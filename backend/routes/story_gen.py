@@ -6,20 +6,37 @@ import asyncio
 import json
 import logging
 import re
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
 
+from config import AI_REQUEST_TIMEOUT
 from security import get_current_user
-from gemini_client import gemini_client
+from database import User
+from gemini_client import get_gemini_client
+from gemini_tts import generate_tts
 from limiter import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["story-generation"])
 
-_AI_TIMEOUT = 60.0  # seconds
+# Language code to display name mapping
+LANGUAGE_NAMES = {
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'zh-CN': 'Chinese (Simplified)',
+    'zh-TW': 'Chinese (Traditional)',
+    'ru': 'Russian',
+    'pt': 'Portuguese',
+    'en': 'English',
+    'ar': 'Arabic',
+}
 
 
 def _sanitize_json_text(text: str) -> str:
@@ -37,18 +54,35 @@ def _sanitize_json_text(text: str) -> str:
     return text
 
 
-def _get_gemini_client():
-    if not gemini_client:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini service is not available. Please configure GEMINI_COOKIE_1PSID and optionally GEMINI_COOKIE_1PSIDTS environment variables."
-        )
-    return gemini_client
+# Language validation pattern (BCP 47 basic)
+_language_regex = re.compile(r'^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2})?$')
+
+
+def _validate_language(v: str) -> str:
+    """Validate language code format."""
+    if not v:
+        raise ValueError("Language is required")
+    if not _language_regex.match(v):
+        raise ValueError(f"Invalid language format: {v}. Use format like 'en', 'en-US', 'zh-CN'")
+    return v
 
 
 class StoryGenRequest(BaseModel):
     language: str = Field(min_length=1, max_length=100)
     words: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("words")
+    @classmethod
+    def validate_words(cls, v: str) -> str:
+        # Basic sanitization - prevent script injection in words list
+        if re.search(r'[<>"\'&]', v):
+            raise ValueError("Words contain invalid characters")
+        return v
 
 
 class AudioGenRequest(BaseModel):
@@ -56,11 +90,27 @@ class AudioGenRequest(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     story: str = Field(min_length=1, max_length=50_000)
 
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
+
+    @field_validator("story")
+    @classmethod
+    def sanitize_story(cls, v: str) -> str:
+        """Sanitize HTML tags from story."""
+        return re.sub(r'<[^>]+>', '', v)
+
 
 class QuizGenRequest(BaseModel):
     language: str = Field(min_length=1, max_length=100)
     story: str = Field(min_length=1, max_length=50_000)
     vocabulary: list
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        return _validate_language(v)
 
 
 @router.post("/generate-quiz")
@@ -68,50 +118,52 @@ class QuizGenRequest(BaseModel):
 async def generate_quiz(
     request: Request,
     body: QuizGenRequest,
-    api_key: str = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Generate a vocabulary quiz based on a story using Gemini AI."""
-    client = _get_gemini_client()
-
-    clean_story = re.sub(r"<[^>]+>", "", body.story)
-    vocab_list = ", ".join(
-        f"{v.get('word', '')} = {v.get('equivalent_in_english', '')}"
-        for v in body.vocabulary
-    )
-
-    prompt = (
-        f"You are a fun and engaging language quiz creator. Based on this {body.language} "
-        "vocabulary words, create an interactive quiz to help the learner remember the words.\n\n"
-        f"Vocabulary words: {vocab_list}\n\n"
-        "Create 3 questions per vocabulary word with VARIED types to keep it exciting:\n"
-        '- "multiple_choice": 4 options, only one correct\n'
-        '- "fill_blank": sentence with _____ where the answer goes\n'
-        '- "true_false": options must be exactly ["True", "False"]\n\n'
-        "Rules:\n"
-        "- Make wrong options (distractors) plausible but clearly wrong\n"
-        "- Explanations should be fun, memorable mnemonics or story references\n"
-        "- Mix question types so it stays engaging\n"
-        "- For fill_blank, the correct_answer is the exact word that fills the blank\n\n"
-        "Return ONLY valid JSON with this exact structure (no markdown):\n"
-        '{\n'
-        '  "questions": [\n'
-        '    {\n'
-        '      "id": 1,\n'
-        '      "type": "multiple_choice",\n'
-        f'      "question": "The question in the {body.language} language",\n'
-        '      "options": ["gato", "perro", "pájaro", "pez"],\n'
-        '      "correct_answer": "gato",\n'
-        '      "explanation": "Gato = cat! Think of a cat saying GA-TO when it meows.",\n'
-        '      "word": "gato"\n'
-        "    }\n"
-        "  ]\n"
-        "}"
-    )
-
     try:
-        await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+        client = await get_gemini_client()
+
+        # Get display name for the language
+        language_display = LANGUAGE_NAMES.get(body.language, body.language)
+
+        clean_story = re.sub(r"<[^>]+>", "", body.story)
+        vocab_list = ", ".join(
+            f"{v.get('word', '')} = {v.get('equivalent_in_english', '')}"
+            for v in body.vocabulary
+        )
+
+        prompt = (
+            f"You are a fun and engaging language quiz creator. Based on this {language_display} "
+            "vocabulary words, create an interactive quiz to help the learner remember the words.\n\n"
+            f"Vocabulary words: {vocab_list}\n\n"
+            "Create 3 questions per vocabulary word with VARIED types to keep it exciting:\n"
+            '- "multiple_choice": 4 options, only one correct\n'
+            '- "fill_blank": sentence with _____ where the answer goes\n'
+            '- "true_false": options must be exactly ["True", "False"]\n\n'
+            "Rules:\n"
+            "- Make wrong options (distractors) plausible but clearly wrong\n"
+            "- Explanations should be fun, memorable mnemonics or story references\n"
+            "- Mix question types so it stays engaging\n"
+            "- For fill_blank, the correct_answer is the exact word that fills the blank\n\n"
+            "Return ONLY valid JSON with this exact structure (no markdown):\n"
+            '{\n'
+            '  "questions": [\n'
+            '    {\n'
+            '      "id": 1,\n'
+            '      "type": "multiple_choice",\n'
+            f'      "question": "The question in the {language_display} language",\n'
+            '      "options": ["gato", "perro", "pájaro", "pez"],\n'
+            '      "correct_answer": "gato",\n'
+            '      "explanation": "Gato = cat! Think of a cat saying GA-TO when it meows.",\n'
+            '      "word": "gato"\n'
+            "    }\n"
+            "  ]\n"
+            "}"
+        )
+
         response = await asyncio.wait_for(
-            client.generate_content(prompt), timeout=_AI_TIMEOUT
+            client.generate_content(prompt), timeout=AI_REQUEST_TIMEOUT
         )
 
         if not response.text:
@@ -128,6 +180,9 @@ async def generate_quiz(
         raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Gemini client not configured
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating quiz: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate quiz.")
@@ -138,34 +193,36 @@ async def generate_quiz(
 async def generate_story(
     request: Request,
     body: StoryGenRequest,
-    api_key: str = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Generate a vocabulary story using Gemini AI."""
-    client = _get_gemini_client()
-
-    prompt = (
-        f"Write an engaging story in {body.language} that incorporates the following "
-        f"vocabulary words: {body.words}.\n where each targeted vocabulary word will "
-        "be wrapped in <span class='highlight' title='English Translation'>word</span> \n"
-        "Return the result as a raw JSON object with this exact structure:\n"
-        "{\n"
-        f'  "title": "Story Title in {body.language}",\n'
-        f'  "story": "The story in {body.language}, with the requested vocabulary words",\n'
-        '  "vocabulary": [\n'
-        '    {\n'
-        '      "word": "The original word submitted by the user",\n'
-        f'      "meaning_in_target": "The meaning of the word in {body.language}",\n'
-        '      "equivalent_in_english": "The equivalent word in English"\n'
-        '    }\n'
-        '  ]\n'
-        "}\n\n"
-        "Ensure your response is ONLY valid JSON, without any markdown formatting like ```json."
-    )
-
     try:
-        await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+        client = await get_gemini_client()
+
+        # Get display name for the language
+        language_display = LANGUAGE_NAMES.get(body.language, body.language)
+
+        prompt = (
+            f"Write an engaging story in {language_display} that incorporates the following "
+            f"vocabulary words: {body.words}.\n where each targeted vocabulary word will "
+            "be wrapped in <span class='highlight' title='English Translation'>word</span> \n"
+            "Return the result as a raw JSON object with this exact structure:\n"
+            "{\n"
+            f'  "title": "Story Title in {language_display}",\n'
+            f'  "story": "The story in {language_display}, with the requested vocabulary words",\n'
+            '  "vocabulary": [\n'
+            '    {\n'
+            '      "word": "The original word submitted by the user",\n'
+            f'      "meaning_in_target": "The meaning of the word in {body.language}",\n'
+            '      "equivalent_in_english": "The equivalent word in English"\n'
+            '    }\n'
+            '  ]\n'
+            "}\n\n"
+            "Ensure your response is ONLY valid JSON, without any markdown formatting like ```json."
+        )
+
         response = await asyncio.wait_for(
-            client.generate_content(prompt), timeout=_AI_TIMEOUT
+            client.generate_content(prompt), timeout=AI_REQUEST_TIMEOUT
         )
 
         if not response.text:
@@ -182,6 +239,9 @@ async def generate_story(
         raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Gemini client not configured
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating story: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate story.")
@@ -192,48 +252,24 @@ async def generate_story(
 async def generate_audio(
     request: Request,
     body: AudioGenRequest,
-    api_key: str = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Generate TTS audio for a story using Gemini AI."""
-    client = _get_gemini_client()
-
-    clean_story = re.sub(r"<[^>]+>", "", body.story)
-    prompt = (
-        f"Please read the following story aloud in {body.language}:\n\n"
-        f"{body.title}\n\n{clean_story}"
-    )
-
     try:
-        await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
-        response = await asyncio.wait_for(
-            client.generate_content(prompt), timeout=_AI_TIMEOUT
+        # Use the dedicated TTS function (requires GEMINI_API_KEY)
+        audio_bytes, mime_type = await generate_tts(
+            language=body.language,
+            title=body.title,
+            story=body.story  # already sanitized by validator
         )
 
-        audio_part = None
-        candidates = response.candidates or []
-        for candidate in candidates:
-            parts = (
-                getattr(candidate, "parts", None)
-                or getattr(getattr(candidate, "content", None), "parts", None)
-                or []
-            )
-            for part in parts:
-                if (
-                    part.inline_data
-                    and part.inline_data.mime_type
-                    and part.inline_data.mime_type.startswith("audio/")
-                ):
-                    audio_part = part
-                    break
-            if audio_part:
-                break
-
-        if not audio_part or not audio_part.inline_data:
-            raise HTTPException(status_code=500, detail="No audio returned from AI.")
+        # Encode audio bytes to base64 for JSON transport
+        import base64
+        audio_data_b64 = base64.b64encode(audio_bytes).decode('utf-8')
 
         return JSONResponse(content={
-            "audio_data": audio_part.inline_data.data,
-            "mime_type": audio_part.inline_data.mime_type,
+            "audio_data": audio_data_b64,
+            "mime_type": mime_type,
         })
 
     except asyncio.TimeoutError:
@@ -241,6 +277,9 @@ async def generate_audio(
         raise HTTPException(status_code=504, detail="AI request timed out. Please try again.")
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Missing API key or configuration error
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate audio.")

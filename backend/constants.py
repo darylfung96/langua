@@ -1,0 +1,30 @@
+"""Shared constants for the application to prevent drift between validation layers."""
+
+# Database column length constraints
+MAX_EMAIL_LENGTH = 255
+MAX_PASSWORD_HASH_LENGTH = 255
+MAX_GOOGLE_ID_LENGTH = 255
+MAX_TITLE_LENGTH = 500
+MAX_FILE_NAME_LENGTH = 255
+MAX_FILE_TYPE_LENGTH = 100
+MAX_LANGUAGE_LENGTH = 100
+MAX_WORD_LENGTH = 200
+MAX_PROMPT_LENGTH = 5000
+MAX_EXPLANATION_LENGTH = 10000
+MAX_STORY_CONTENT_LENGTH = 100000
+MAX_AUDIO_BASE64_LENGTH = 90000000  # ~67MB binary → 90MB base64
+MAX_VIDEO_ID_LENGTH = 50
+
+# JSON field limits
+MAX_JSON_STRING_LENGTH = 2000000  # 2MB for serialized JSON
+
+# Upload limits
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+# Validation patterns
+LANGUAGE_PATTERN = r'^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2})?$'  # BCP 47 basic
+
+# Rate limiting
+DEFAULT_RATE_LIMIT = "60/minute"
+AUTH_REGISTER_LIMIT = "10/hour"
+AUTH_LOGIN_LIMIT = "15/minute"

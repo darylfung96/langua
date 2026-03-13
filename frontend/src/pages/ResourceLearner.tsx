@@ -1,6 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileAudio, FileVideo, Languages, Loader2, CheckCircle2, AlertCircle, Save, Trash2 } from 'lucide-react';
 import './ResourceLearner.css';
+import { apiFetch } from '../utils/apiClient';
+
+const ALLOWED_MIME_TYPES = new Set([
+  'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
+  'audio/ogg', 'audio/flac', 'video/mp4', 'video/webm', 'video/ogg',
+]);
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+function validateFile(f: File): string | null {
+  const baseMime = f.type.split(';')[0].trim().toLowerCase();
+  if (!ALLOWED_MIME_TYPES.has(baseMime)) {
+    return `File type "${f.type}" is not supported. Please upload an audio or video file (MP3, WAV, MP4, etc.).`;
+  }
+  if (f.size > MAX_FILE_SIZE_BYTES) {
+    return `File is too large (${(f.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is 50 MB.`;
+  }
+  return null;
+}
 
 interface TranscriptSegment {
   id: number;
@@ -37,13 +55,12 @@ const ResourceLearner = () => {
   const [savedResources, setSavedResources] = useState<SavedResource[]>([]);
   const [isLoadingSavedResources, setIsLoadingSavedResources] = useState(false);
   const [mediaFileType, setMediaFileType] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-  const backendApiKey = import.meta.env.VITE_BACKEND_API_KEY;
 
   // Load saved resources on mount
   useEffect(() => {
@@ -53,18 +70,13 @@ const ResourceLearner = () => {
   const loadSavedResources = async () => {
     setIsLoadingSavedResources(true);
     try {
-      const response = await fetch(`${backendUrl}/resources`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
+      const response = await apiFetch('/resources');
       if (response.ok) {
         const data = await response.json();
-        console.log('Loaded saved resources:', data);
         setSavedResources(data.resources);
-      } else {
-        console.error('Failed to fetch resources:', response.status);
       }
-    } catch (err) {
-      console.error('Failed to load saved resources:', err);
+    } catch {
+      // silently fail — list is a convenience; don't block UX
     } finally {
       setIsLoadingSavedResources(false);
     }
@@ -86,31 +98,19 @@ const ResourceLearner = () => {
       formData.append('transcript', JSON.stringify(transcript));
       formData.append('media_file', file);
 
-      const saveResponse = await fetch(`${backendUrl}/resources`, {
+      const saveResponse = await apiFetch('/resources', {
         method: 'POST',
-        headers: {
-          'X-API-Key': backendApiKey
-        },
-        body: formData
+        body: formData,
       });
 
-      if (!saveResponse.ok) {
-        const errorText = await saveResponse.text();
-        console.error('Save error:', saveResponse.status, errorText);
-        throw new Error('Failed to save resource');
-      }
-
-      const saveData = await saveResponse.json();
-      console.log('Resource saved:', saveData);
-      
+      await saveResponse.json();
       setSuccess('Resource saved successfully!');
       setTimeout(() => setSuccess(null), 2000);
 
       // Reload saved resources
       loadSavedResources();
     } catch (err) {
-      console.error('Error saving resource:', err);
-      setError((err as Error).message || 'Failed to save resource');
+      setError(err instanceof Error ? err.message : 'Failed to save resource');
     } finally {
       setIsSaving(false);
     }
@@ -118,19 +118,8 @@ const ResourceLearner = () => {
 
   const loadResourceFromSaved = async (resourceId: string) => {
     try {
-      const response = await fetch(`${backendUrl}/resources/${resourceId}`, {
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Backend error:', response.status, errorText);
-        throw new Error(`Failed to load resource: ${response.statusText}`);
-      }
-
+      const response = await apiFetch(`/resources/${resourceId}`);
       const data = await response.json();
-      console.log('Loaded resource data:', data);
-      
       setTranscript(data.transcript);
       setLanguage(data.language);
       setFile(null);
@@ -141,42 +130,34 @@ const ResourceLearner = () => {
       // Load media file if available
       if (data.media_file_path) {
         try {
-          const mediaResponse = await fetch(`${backendUrl}/resources/media/${resourceId}`, {
-            headers: { 'X-API-Key': backendApiKey }
-          });
+          const mediaResponse = await apiFetch(`/resources/media/${resourceId}`);
           if (mediaResponse.ok) {
             const blob = await mediaResponse.blob();
             const mediaUrl = URL.createObjectURL(blob);
             setMediaUrl(mediaUrl);
-            console.log('Media loaded from resource');
           }
-        } catch (err) {
-          console.warn('Could not load media file:', err);
+        } catch {
           // Continue anyway, transcript is still available
         }
       } else {
         setMediaUrl(null);
       }
-    } catch (err: any) {
-      console.error('Error loading resource:', err);
-      setError(`Failed to load resource: ${err.message}`);
+    } catch (err: unknown) {
+      setError(`Failed to load resource: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
   const deleteResource = async (resourceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this resource?')) return;
-
+    if (pendingDeleteId !== resourceId) {
+      setPendingDeleteId(resourceId);
+      return;
+    }
+    setPendingDeleteId(null);
     try {
-      const response = await fetch(`${backendUrl}/resources/${resourceId}`, {
-        method: 'DELETE',
-        headers: { 'X-API-Key': backendApiKey }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete resource');
-      }
-
+      await apiFetch(`/resources/${resourceId}`, { method: 'DELETE' });
+      setSuccess('Resource deleted!');
+      setTimeout(() => setSuccess(null), 2000);
       loadSavedResources();
     } catch (err) {
       setError('Failed to delete resource');
@@ -187,6 +168,11 @@ const ResourceLearner = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
+      const validationError = validateFile(selectedFile);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
       setFile(selectedFile);
       setMediaFileType(null);
@@ -200,7 +186,12 @@ const ResourceLearner = () => {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && (droppedFile.type.startsWith('audio/') || droppedFile.type.startsWith('video/'))) {
+    if (droppedFile) {
+      const validationError = validateFile(droppedFile);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
       setFile(droppedFile);
       setMediaFileType(null);
@@ -222,20 +213,12 @@ const ResourceLearner = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${backendUrl}/transcribe?language=${language}`, {
+      const response = await apiFetch(`/transcribe?language=${language}`, {
         method: 'POST',
-        headers: {
-          'X-API-Key': import.meta.env.VITE_BACKEND_API_KEY
-        },
-        body: formData
+        body: formData,
       });
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.statusText}`);
-      }
-
       const data: TranscribeResponse = await response.json();
-      console.log('Transcription Result:', data);
 
       if (data && data.segments) {
         setTranscript(data.segments);
@@ -244,9 +227,8 @@ const ResourceLearner = () => {
         throw new Error('Invalid response format from server.');
       }
 
-    } catch (err: any) {
-      console.error('Transcription error:', err);
-      setError(`Transcription failed: ${err.message}. Please ensure the backend is running at http://localhost:8000`);
+    } catch (err: unknown) {
+      setError(`Transcription failed: ${err instanceof Error ? err.message : 'Unknown error'}.`);
     } finally {
       setIsTranscribing(false);
     }
@@ -445,17 +427,19 @@ const ResourceLearner = () => {
                     <button
                       onClick={(e) => deleteResource(resource.id, e)}
                       style={{
-                        background: 'rgba(255,107,107,0.2)',
+                        background: pendingDeleteId === resource.id ? 'rgba(255,107,107,0.5)' : 'rgba(255,107,107,0.2)',
                         border: 'none',
                         borderRadius: '0.25rem',
                         padding: '0.25rem 0.5rem',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        color: '#ff6b6b'
+                        color: '#ff6b6b',
+                        fontSize: pendingDeleteId === resource.id ? '0.7rem' : undefined,
                       }}
+                      title={pendingDeleteId === resource.id ? 'Click again to confirm delete' : 'Delete'}
                     >
-                      <Trash2 size={14} />
+                      {pendingDeleteId === resource.id ? 'Confirm?' : <Trash2 size={14} />}
                     </button>
                   </button>
                 ))}

@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from database import get_db, User
 from schemas import VisualRequest, VisualDetailResponse, SavedVisualListItem
 from security import get_current_user
+from utils import format_timestamp
 from services.visual_service import (
     save_visual as save_visual_db,
     get_all_visuals as get_all_visuals_db,
@@ -32,7 +32,7 @@ async def save_visual(
             "id": visual.id,
             "word": visual.word,
             "language": visual.language,
-            "created_at": visual.created_at.isoformat()
+            "created_at": format_timestamp(visual.created_at)
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -45,7 +45,7 @@ async def save_visual(
 async def get_all_visuals(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: Optional[int] = Query(None, ge=1, le=200, description="Max records to return"),
+    limit: int = Query(20, ge=1, le=200, description="Max records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
 ):
     """Fetch saved visuals with optional pagination."""
@@ -57,8 +57,8 @@ async def get_all_visuals(
                     id=visual.id,
                     word=visual.word,
                     language=visual.language,
-                    created_at=visual.created_at.isoformat(),
-                    updated_at=visual.updated_at.isoformat(),
+                    created_at=format_timestamp(visual.created_at),
+                    updated_at=format_timestamp(visual.updated_at),
                 ).model_dump()
                 for visual in visuals
             ],
@@ -66,6 +66,7 @@ async def get_all_visuals(
             "offset": offset,
         })
     except Exception as e:
+        logger.error(f"Error fetching visuals: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch visuals.")
 
 
@@ -82,6 +83,7 @@ async def get_visual(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"Error fetching visual {visual_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch visual.")
 
 

@@ -83,6 +83,7 @@
 .header-actions {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
 }
 
 .profile-btn {
@@ -111,4 +112,21 @@
   justify-content: center;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.logout-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
 }
