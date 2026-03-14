@@ -341,7 +341,10 @@ const StoryWeaver = () => {
 
   const jumpToWord = (index: number, total: number) => {
     if (audioRef.current && duration) {
-      const time = (index / total) * duration;
+      // The audio includes the title before the story, so offset the word position
+      // by the number of title words to get a more accurate timestamp.
+      const titleWordCount = storyData ? storyData.title.split(/\s+/).filter(Boolean).length / 2 : 0;
+      const time = ((titleWordCount + index) / (titleWordCount + total)) * duration;
       audioRef.current.currentTime = time;
       if (!isPlaying) {
         audioRef.current.play().catch(e => console.error("Error playing audio on jump:", e));

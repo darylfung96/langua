@@ -41,7 +41,9 @@ const VisualMemory = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [imageData, setImageData] = useState<ImageResponse | null>(null);
-  const [view, setView] = useState<'generator' | 'library'>('generator');
+  const [view, setView] = useState<'generator' | 'library'>(
+    () => (sessionStorage.getItem('visualMemory_view') as 'generator' | 'library') || 'generator'
+  );
   const [savedVisuals, setSavedVisuals] = useState<SavedVisual[]>([]);
   const [selectedVisual, setSelectedVisual] = useState<VisualDetail | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
@@ -49,11 +51,30 @@ const VisualMemory = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
+  // Persist active tab across navigation
   useEffect(() => {
+    sessionStorage.setItem('visualMemory_view', view);
     if (view === 'library') {
       loadVisuals();
     }
   }, [view]);
+
+  // On mount: restore the previously selected visual
+  useEffect(() => {
+    const savedId = sessionStorage.getItem('visualMemory_selectedVisualId');
+    if (savedId) {
+      loadVisualDetail(savedId);
+    }
+  }, []);
+
+  // Persist the selected visual id so it survives navigation
+  useEffect(() => {
+    if (selectedVisual) {
+      sessionStorage.setItem('visualMemory_selectedVisualId', selectedVisual.id);
+    } else {
+      sessionStorage.removeItem('visualMemory_selectedVisualId');
+    }
+  }, [selectedVisual]);
 
   const loadVisuals = async () => {
     setLoadingLibrary(true);
