@@ -42,7 +42,7 @@ async def save_lyric(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error saving lyric: {e}", exc_info=True)
+        logger.error(f"Error saving lyric for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save lyric.")
 
 
@@ -73,7 +73,7 @@ async def get_all_lyrics(
             "offset": offset,
         })
     except Exception as e:
-        logger.error(f"Error fetching lyrics: {e}", exc_info=True)
+        logger.error(f"Error fetching lyrics for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch lyrics.")
 
 
@@ -90,7 +90,7 @@ async def get_lyric(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching lyric {lyric_id}: {e}", exc_info=True)
+        logger.error(f"Error fetching lyric {lyric_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch lyric.")
 
 
@@ -109,6 +109,6 @@ async def delete_lyric(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting lyric: {e}", exc_info=True)
+        logger.error(f"Error deleting lyric {lyric_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete lyric.")
 

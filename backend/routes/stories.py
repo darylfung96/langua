@@ -41,7 +41,7 @@ async def save_story(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error saving story: {e}", exc_info=True)
+        logger.error(f"Error saving story for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save story.")
 
 
@@ -72,7 +72,7 @@ async def get_all_stories(
             "offset": offset,
         })
     except Exception as e:
-        logger.error(f"Error fetching stories: {e}", exc_info=True)
+        logger.error(f"Error fetching stories for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch stories.")
 
 
@@ -89,7 +89,7 @@ async def get_story(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching story {story_id}: {e}", exc_info=True)
+        logger.error(f"Error fetching story {story_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch story.")
 
 
@@ -108,6 +108,6 @@ async def delete_story(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting story: {e}", exc_info=True)
+        logger.error(f"Error deleting story {story_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete story.")
 

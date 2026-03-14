@@ -42,7 +42,7 @@ async def save_visual(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error saving visual: {e}", exc_info=True)
+        logger.error(f"Error saving visual for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save visual.")
 
 
@@ -73,7 +73,7 @@ async def get_all_visuals(
             "offset": offset,
         })
     except Exception as e:
-        logger.error(f"Error fetching visuals: {e}", exc_info=True)
+        logger.error(f"Error fetching visuals for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch visuals.")
 
 
@@ -90,7 +90,7 @@ async def get_visual(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching visual {visual_id}: {e}", exc_info=True)
+        logger.error(f"Error fetching visual {visual_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch visual.")
 
 
@@ -109,6 +109,6 @@ async def delete_visual(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting visual: {e}", exc_info=True)
+        logger.error(f"Error deleting visual {visual_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete visual.")
 

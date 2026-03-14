@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Layout
@@ -6,16 +7,24 @@ import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './contexts/AuthContext';
 
-// Pages
-import Dashboard from './pages/Dashboard';
-import StoryWeaver from './pages/StoryWeaver';
-import Melody from './pages/Melody';
-import Podcasts from './pages/Podcasts';
-import VisualMemory from './pages/VisualMemory';
-import Writing from './pages/Writing';
-import ResourceLearner from './pages/ResourceLearner';
-import NotFound from './pages/NotFound';
-import Login from './pages/Login';
+// Pages — lazily loaded so each route is a separate chunk, reducing initial bundle size
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const StoryWeaver = lazy(() => import('./pages/StoryWeaver'));
+const Melody = lazy(() => import('./pages/Melody'));
+const Podcasts = lazy(() => import('./pages/Podcasts'));
+const VisualMemory = lazy(() => import('./pages/VisualMemory'));
+const Writing = lazy(() => import('./pages/Writing'));
+const ResourceLearner = lazy(() => import('./pages/ResourceLearner'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const Login = lazy(() => import('./pages/Login'));
+
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid var(--accent-primary, #6366f1)', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
+    </div>
+  );
+}
 
 function App() {
   return (
@@ -26,19 +35,21 @@ function App() {
 
           <main className="main-content">
             <ErrorBoundary>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route element={<ProtectedRoute />}>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/story-weaver" element={<StoryWeaver />} />
-                  <Route path="/melody" element={<Melody />} />
-                  <Route path="/podcasts" element={<Podcasts />} />
-                  <Route path="/visual-memory" element={<VisualMemory />} />
-                  <Route path="/writing" element={<Writing />} />
-                  <Route path="/resource-learner" element={<ResourceLearner />} />
-                  <Route path="*" element={<NotFound />} />
-                </Route>
-              </Routes>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route element={<ProtectedRoute />}>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/story-weaver" element={<StoryWeaver />} />
+                    <Route path="/melody" element={<Melody />} />
+                    <Route path="/podcasts" element={<Podcasts />} />
+                    <Route path="/visual-memory" element={<VisualMemory />} />
+                    <Route path="/writing" element={<Writing />} />
+                    <Route path="/resource-learner" element={<ResourceLearner />} />
+                    <Route path="*" element={<NotFound />} />
+                  </Route>
+                </Routes>
+              </Suspense>
             </ErrorBoundary>
           </main>
         </div>

@@ -63,7 +63,7 @@ async def save_resource(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error saving resource: {e}", exc_info=True)
+        logger.error(f"Error saving resource for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save resource.")
 
 
@@ -96,7 +96,7 @@ async def get_all_resources(
             "offset": offset,
         })
     except Exception as e:
-        logger.error(f"Error fetching resources: {e}", exc_info=True)
+        logger.error(f"Error fetching resources for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch resources.")
 
 
@@ -113,7 +113,7 @@ async def get_resource(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching resource {resource_id}: {e}", exc_info=True)
+        logger.error(f"Error fetching resource {resource_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch resource.")
 
 
@@ -141,7 +141,7 @@ async def get_media(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching media: {e}", exc_info=True)
+        logger.error(f"Error fetching media for resource {resource_id} user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch media.")
 
 
@@ -160,6 +160,6 @@ async def delete_resource(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting resource: {e}", exc_info=True)
+        logger.error(f"Error deleting resource {resource_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete resource.")
 
