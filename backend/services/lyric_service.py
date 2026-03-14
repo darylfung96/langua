@@ -55,6 +55,10 @@ def get_all_lyrics(db: Session, user_id: str, limit: int | None = None, offset: 
     return _service.get_all(db, user_id, limit=limit, offset=offset)
 
 
+def count_lyrics(db: Session, user_id: str) -> int:
+    return _service.count(db, user_id)
+
+
 def get_lyric_by_id(lyric_id: str, db: Session, user_id: str) -> Lyric:
     return _service.get_by_id(lyric_id, db, user_id)
 

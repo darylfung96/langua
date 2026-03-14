@@ -5,9 +5,11 @@ import uuid
 import re
 from pathlib import Path
 
+from config import UPLOADS_DIR as _UPLOADS_DIR
+
 logger = logging.getLogger(__name__)
 
-UPLOADS_DIR = Path(__file__).parent / "uploads"
+UPLOADS_DIR = Path(_UPLOADS_DIR)
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 # Allowed MIME types with extensions and magic byte signatures
@@ -60,37 +62,37 @@ _MAGIC_BYTE_CHECK_SIZE = 16  # Check first 16 bytes for magic signatures
 
 def _detect_mime_from_magic(file_data: bytes, claimed_mime: str) -> str:
     """
-    Detect MIME type by inspecting file magic bytes.
-    Returns the detected MIME or raises ValueError if not matching allowed types.
+    Validate file content by inspecting magic bytes against the claimed MIME type.
+    Returns the detected MIME or raises ValueError if content doesn't match.
     """
     header = file_data[:_MAGIC_BYTE_CHECK_SIZE]
 
-    # Check against known magic signatures
     for mime, info in ALLOWED_MEDIA_TYPES.items():
         for magic in info["magic"]:
             if header.startswith(magic):
-                # If we found a match, verify it's in the claimed MIME or any allowed MIME
                 if mime == claimed_mime:
                     return mime
-                # If the claimed MIME is a different allowed type, still accept if file is valid
-                # (e.g., client says audio/mpeg but file is audio/mp3 - both map to same type)
-                for alt_mime in ALLOWED_MEDIA_TYPES:
-                    if claimed_mime == alt_mime and mime in ALLOWED_MEDIA_TYPES:
-                        return mime
+                # Accept aliases that map to the same physical format
+                # (e.g. audio/mpeg ↔ audio/mp3 both use MP3 magic bytes)
+                claimed_extensions = ALLOWED_MEDIA_TYPES.get(claimed_mime, {}).get("extensions", [])
+                detected_extensions = info.get("extensions", [])
+                if set(claimed_extensions) & set(detected_extensions):
+                    return claimed_mime
 
-    raise ValueError(f"File content does not match the declared type {claimed_mime}")
+    raise ValueError(f"File content does not match the declared type '{claimed_mime}'")
 
 
 def _is_safe_path(base_dir: Path, target_path: Path) -> bool:
     """
     Verify that target_path resolves to a location within base_dir.
-    Uses realpath() to resolve all symlinks and prevents directory traversal.
+    Uses Path.relative_to() after resolving symlinks to prevent directory traversal.
     """
     try:
-        resolved_base = os.path.realpath(str(base_dir))
-        resolved_target = os.path.realpath(str(target_path))
-        return resolved_target.startswith(resolved_base + os.sep) or resolved_target == resolved_base
-    except (OSError, ValueError):
+        resolved_base = base_dir.resolve()
+        resolved_target = target_path.resolve()
+        resolved_target.relative_to(resolved_base)
+        return True
+    except (ValueError, OSError):
         return False
 
 

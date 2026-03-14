@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
@@ -12,15 +12,20 @@ from utils import format_timestamp
 from services.lyric_service import (
     save_lyric as save_lyric_db,
     get_all_lyrics as get_all_lyrics_db,
+    count_lyrics as count_lyrics_db,
     get_lyric_by_id as get_lyric_by_id_db,
     delete_lyric as delete_lyric_db,
 )
+from limiter import limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["lyrics"])
 
 
 @router.post("/lyrics")
+@limiter.limit("30/minute", key_func=get_remote_address)
 async def save_lyric(
+    request: Request,
     lyric_data: LyricRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -51,6 +56,7 @@ async def get_all_lyrics(
     """Fetch saved lyrics with optional pagination."""
     try:
         lyrics = get_all_lyrics_db(db, current_user.id, limit=limit, offset=offset)
+        total = count_lyrics_db(db, current_user.id)
         return JSONResponse(content={
             "lyrics": [
                 SavedLyricListItem(
@@ -62,6 +68,7 @@ async def get_all_lyrics(
                 ).model_dump()
                 for lyric in lyrics
             ],
+            "total": total,
             "limit": limit,
             "offset": offset,
         })
@@ -88,7 +95,9 @@ async def get_lyric(
 
 
 @router.delete("/lyrics/{lyric_id}")
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def delete_lyric(
+    request: Request,
     lyric_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

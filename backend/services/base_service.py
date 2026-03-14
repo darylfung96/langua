@@ -25,6 +25,14 @@ class BaseService(Generic[T]):
     # Subclasses may set this to the column used for ordering list results.
     order_column: str = "created_at"
 
+    def count(self, db: Session, user_id: str) -> int:
+        """Return the total number of records owned by the given user."""
+        try:
+            return db.query(self.model).filter(self.model.user_id == user_id).count()
+        except Exception as e:
+            logger.error(f"Error counting {self.model.__name__}: {e}")
+            raise
+
     def get_all(
         self,
         db: Session,

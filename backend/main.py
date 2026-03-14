@@ -9,17 +9,19 @@ import os
 import sys
 import uuid
 import uvicorn
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pathlib import Path
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from config import CORS_ORIGINS, IS_PRODUCTION, LOG_LEVEL, LOG_FORMAT
-from database import User, get_db, SessionLocal
+from config import CORS_ORIGINS, IS_PRODUCTION, LOG_LEVEL, LOG_FORMAT, SERVER_SSL_CERT_FILE, SERVER_SSL_KEY_FILE, AUTO_INIT_DB
+from database import User, get_db, SessionLocal, init_db
 from file_storage import UPLOADS_DIR, get_media_file_path
 from limiter import limiter
 from security import decode_token, AUTH_COOKIE_NAME, get_current_user
@@ -33,6 +35,7 @@ from routes.youtube import router as youtube_router
 from routes.image import router as image_router
 from routes.visual import router as visual_router
 from routes.story_gen import router as story_gen_router
+from routes.shadowing import router as shadowing_router
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,7 @@ def setup_logging():
     else:
         handler.setFormatter(logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="H:M:S"
+            datefmt="%H:%M:%S"
         ))
 
     root_logger.addHandler(handler)
@@ -96,24 +99,72 @@ setup_logging()
 
 
 # Improved CORS check
-_LOCALHOST_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
+_LOCALHOST_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "https://localhost:5173", "https://127.0.0.1:5173"}
 if CORS_ORIGINS and all(origin in _LOCALHOST_ORIGINS for origin in CORS_ORIGINS):
     logger.warning(
         "CORS_ORIGINS is set to localhost only. "
         "Set the CORS_ORIGINS environment variable to your production domain(s) before deploying."
     )
-elif IS_PRODUCTION and any('localhost' in origin or '127.0.0.1' in origin for origin in CORS_ORIGINS):
-    logger.warning(
-        "Running in production but CORS_ORIGINS contains localhost. "
-        "This may prevent legitimate users from accessing your app."
-    )
+if IS_PRODUCTION:
+    # Check for localhost in any origin
+    if any('localhost' in origin or '127.0.0.1' in origin for origin in CORS_ORIGINS):
+        logger.warning(
+            "Running in production but CORS_ORIGINS contains localhost. "
+            "This may prevent legitimate users from accessing your app."
+        )
+    # Check for HTTP (non-HTTPS) origins - dangerous in prod
+    for origin in CORS_ORIGINS:
+        if origin.startswith("http://"):
+            logger.warning(
+                f"CORS origin '{origin}' uses HTTP in production. "
+                "This can expose your application to man-in-the-middle attacks. "
+                "Use HTTPS URLs only."
+            )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup/shutdown tasks."""
+    if AUTO_INIT_DB:
+        init_db()  # Create tables if they don't exist yet (dev/test convenience only)
+        logger.info("Database initialized (auto-init enabled)")
+    else:
+        logger.info("Skipping database auto-initialization (use migrations in production)")
+    yield
 
 
 # Create FastAPI app
 app = FastAPI(
     title="Language Learner API",
-    description="API for language learning with story generation, transcription, and image generation"
+    description="API for language learning with story generation, transcription, and image generation",
+    lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security-related HTTP response headers."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Content Security Policy - adjust based on your frontend needs
+    # Allows: self-scripts, inline styles, and necessary resources
+    csp_directives = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",  # 'unsafe-inline' for React dev; consider hashes in prod
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",  # API calls
+        "frame-ancestors 'none'",
+    ]
+    response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 @app.middleware("http")
@@ -138,6 +189,23 @@ async def add_request_id(request: Request, call_next):
         return response
     finally:
         logging.setLogRecordFactory(old_factory)
+
+
+@app.middleware("http")
+async def enforce_https(request: Request, call_next):
+    """Redirect HTTP to HTTPS in production."""
+    response = await call_next(request)
+
+    if IS_PRODUCTION and request.url.scheme == "http":
+        # Return 301 Moved Permanently to HTTPS version
+        https_url = request.url.replace(scheme="https")
+        return JSONResponse(
+            status_code=301,
+            content={"message": "HTTPS required", "https_url": str(https_url)},
+            headers={"Location": str(https_url)}
+        )
+
+    return response
 
 
 # Middleware: populate request.state.user_id from JWT for rate limiting
@@ -183,6 +251,7 @@ app.include_router(youtube_router)
 app.include_router(image_router)
 app.include_router(visual_router, prefix="/visuals")
 app.include_router(story_gen_router, prefix="/gemini")
+app.include_router(shadowing_router, prefix="/shadowing")
 
 
 @app.get("/uploads/{filename}")
@@ -212,30 +281,69 @@ async def liveness_check():
 @app.get("/health/ready")
 async def readiness_check():
     """Kubernetes readiness probe - checks if dependencies are available."""
+    checks = {}
     try:
         # Check database connectivity
         db = SessionLocal()
-        db.execute("SELECT 1").scalar()
+        db.execute(text("SELECT 1")).scalar()
         db.close()
-
-        return {
-            "status": "ready",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "checks": {
-                "database": "connected"
-            }
-        }
+        checks["database"] = "connected"
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
+        checks["database"] = "error: " + str(e)
+        return {
+            "status": "unready",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "checks": checks
+        }
+
+    # Check Gemini API configuration (if required)
+    from config import GEMINI_COOKIE_1PSID, GEMINI_API_KEY
+    if GEMINI_COOKIE_1PSID:
+        checks["gemini_cookie"] = "configured"
+    else:
+        checks["gemini_cookie"] = "missing (legacy image generation disabled)"
+    if GEMINI_API_KEY:
+        checks["gemini_api_key"] = "configured"
+    else:
+        checks["gemini_api_key"] = "missing (TTS and story generation may be limited)"
+
+    # All critical checks passed?
+    if checks.get("database") != "connected":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Dependency unavailable: {str(e)}"
+            detail="Service dependency unavailable"
         )
+
+    return {
+        "status": "ready",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": checks
+    }
 
 
 if __name__ == "__main__":
     host = os.getenv("API_HOST", "127.0.0.1")
-    uvicorn.run("main:app", host=host, port=8000, workers=1, reload=False)
+    port = int(os.getenv("API_PORT", "8000"))
+
+    # SSL configuration for HTTPS server
+    ssl_keyfile = SERVER_SSL_KEY_FILE if SERVER_SSL_KEY_FILE else None
+    ssl_certfile = SERVER_SSL_CERT_FILE if SERVER_SSL_CERT_FILE else None
+
+    if ssl_keyfile and ssl_certfile:
+        logger.info(f"Starting HTTPS server with SSL certificates")
+        uvicorn.run(
+            "main:app",
+            host=host,
+            port=port,
+            workers=1,
+            reload=False,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+        )
+    else:
+        logger.info(f"Starting HTTP server (no SSL certificates configured)")
+        uvicorn.run("main:app", host=host, port=port, workers=1, reload=False)
 
 
 

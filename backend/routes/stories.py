@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
@@ -10,16 +10,21 @@ from utils import format_timestamp
 from services.story_service import (
     save_story as save_story_db,
     get_all_stories as get_all_stories_db,
+    count_stories as count_stories_db,
     get_story_by_id as get_story_by_id_db,
     delete_story as delete_story_db,
 )
+from limiter import limiter
+from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["stories"])
 
 
 @router.post("")
+@limiter.limit("30/minute", key_func=get_remote_address)
 async def save_story(
+    request: Request,
     story_data: StoryRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -50,6 +55,7 @@ async def get_all_stories(
     """Fetch saved stories with optional pagination."""
     try:
         stories = get_all_stories_db(db, current_user.id, limit=limit, offset=offset)
+        total = count_stories_db(db, current_user.id)
         return JSONResponse(content={
             "stories": [
                 SavedStoryListItem(
@@ -61,6 +67,7 @@ async def get_all_stories(
                 ).model_dump()
                 for story in stories
             ],
+            "total": total,
             "limit": limit,
             "offset": offset,
         })
@@ -87,7 +94,9 @@ async def get_story(
 
 
 @router.delete("/{story_id}")
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def delete_story(
+    request: Request,
     story_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

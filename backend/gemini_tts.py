@@ -8,24 +8,9 @@ import asyncio
 from typing import Optional, Tuple
 
 from config import GEMINI_API_KEY, AI_REQUEST_TIMEOUT
+from constants import LANGUAGE_NAMES
 
 logger = logging.getLogger(__name__)
-
-# Language code to display name mapping (should match story_gen.py)
-LANGUAGE_NAMES = {
-    'es': 'Spanish',
-    'fr': 'French',
-    'de': 'German',
-    'it': 'Italian',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'zh-CN': 'Chinese (Simplified)',
-    'zh-TW': 'Chinese (Traditional)',
-    'ru': 'Russian',
-    'pt': 'Portuguese',
-    'en': 'English',
-    'ar': 'Arabic',
-}
 
 
 def _get_language_name(language_code: str) -> str:

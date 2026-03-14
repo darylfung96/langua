@@ -56,6 +56,10 @@ def get_all_visuals(db: Session, user_id: str, limit: int | None = None, offset:
     return _service.get_all(db, user_id, limit=limit, offset=offset)
 
 
+def count_visuals(db: Session, user_id: str) -> int:
+    return _service.count(db, user_id)
+
+
 def get_visual_by_id(visual_id: str, db: Session, user_id: str) -> Visual:
     return _service.get_by_id(visual_id, db, user_id)
 

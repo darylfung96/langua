@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiFetch } from '../utils/apiClient';
+import { apiFetch, ApiError } from '../utils/apiClient';
 
 interface UserInfo {
   id: string;
@@ -27,7 +27,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     apiFetch('/auth/me')
       .then((res) => res.json())
       .then((data: UserInfo) => setUser(data))
-      .catch(() => setUser(null))
+      .catch((err) => {
+        // 401 = not authenticated — expected on first load when no session exists.
+        // Any other error (network failure, 5xx) is unexpected; log it for visibility.
+        if (!(err instanceof ApiError && err.status === 401)) {
+          console.error('Auth check failed with unexpected error:', err);
+        }
+        setUser(null);
+      })
       .finally(() => setIsLoading(false));
   }, []);
 

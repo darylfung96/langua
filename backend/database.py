@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Index, event, func
+from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Index, Integer, Float, event, func
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session, relationship
 from datetime import datetime, timezone
 import uuid
@@ -54,11 +54,14 @@ class User(Base):
     hashed_password = Column(String(255), nullable=True)   # NULL for Google-only accounts
     google_id = Column(String(255), unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    failed_login_attempts = Column(Integer, default=0, server_default="0", nullable=False)
+    locked_until = Column(DateTime, nullable=True)
 
     stories = relationship("Story", cascade="all, delete-orphan", passive_deletes=True)
     lyrics = relationship("Lyric", cascade="all, delete-orphan", passive_deletes=True)
     resources = relationship("Resource", cascade="all, delete-orphan", passive_deletes=True)
     visuals = relationship("Visual", cascade="all, delete-orphan", passive_deletes=True)
+    shadowing_sessions = relationship("ShadowingSession", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class Story(Base):
@@ -130,7 +133,65 @@ class Visual(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
-Base.metadata.create_all(bind=engine)
+class ShadowingSession(Base):
+    __tablename__ = "shadowing_sessions"
+    __table_args__ = (
+        Index('ix_shadowing_sessions_user_created', 'user_id', 'created_at'),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    theme = Column(String(255), nullable=False)
+    language = Column(String(100), nullable=False, server_default='en')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+    attempts = relationship("ShadowingAttempt", cascade="all, delete-orphan", passive_deletes=True)
+
+
+class ShadowingAttempt(Base):
+    __tablename__ = "shadowing_attempts"
+    __table_args__ = (
+        Index('ix_shadowing_attempts_session', 'session_id', 'attempted_at'),
+        Index('ix_shadowing_attempts_session_phrase', 'session_id', 'phrase_id'),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String(36), ForeignKey("shadowing_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    phrase_id = Column(Integer, nullable=False)
+    phrase_text = Column(Text, nullable=False)
+    accuracy_score = Column(Float, nullable=False, server_default='0.0')
+    words_matched = Column(Integer, nullable=False, server_default='0')
+    total_words = Column(Integer, nullable=False, server_default='0')
+    attempted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+
+
+class CSRFToken(Base):
+    """CSRF tokens stored in database for validation and revocation."""
+    __tablename__ = "csrf_tokens"
+
+    token_hash = Column(String(64), primary_key=True)  # SHA256 hash of the token
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+
+
+class OAuthCode(Base):
+    """One-time OAuth exchange codes stored in database."""
+    __tablename__ = "oauth_codes"
+    __table_args__ = (
+    )
+
+    code = Column(String(64), primary_key=True)  # The one-time code (sha256 hash or token)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    jwt_token = Column(Text, nullable=False)  # The JWT to be exchanged
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+
+
+def init_db() -> None:
+    """Create all database tables. Called from main.py lifespan on startup."""
+    Base.metadata.create_all(bind=engine)
 
 
 def get_db():

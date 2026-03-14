@@ -4,6 +4,10 @@ import { Sparkles, Loader, AlertCircle, BookOpen, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import './VisualMemory.css';
 import { apiFetch } from '../utils/apiClient';
+import { LANGUAGE_OPTIONS } from '../utils/languages';
+import { useSessionStorage } from '../hooks/useSessionStorage';
+import { useToast } from '../hooks/useToast';
+import { SESSION_KEYS } from '../utils/sessionKeys';
 
 interface GeneratedImage {
   id: number;
@@ -39,21 +43,18 @@ const VisualMemory = () => {
   const [word, setWord] = useState('');
   const [language, setLanguage] = useState('en');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const [imageData, setImageData] = useState<ImageResponse | null>(null);
-  const [view, setView] = useState<'generator' | 'library'>(
-    () => (sessionStorage.getItem('visualMemory_view') as 'generator' | 'library') || 'generator'
-  );
+  const [view, setView] = useSessionStorage<'generator' | 'library'>(SESSION_KEYS.visualMemory.view, 'generator');
   const [savedVisuals, setSavedVisuals] = useState<SavedVisual[]>([]);
+  const [selectedVisualId, setSelectedVisualId] = useSessionStorage<string | null>(SESSION_KEYS.visualMemory.selectedVisualId, null);
   const [selectedVisual, setSelectedVisual] = useState<VisualDetail | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const { success: successMessage, error, setSuccess: setSuccessMessage, setError } = useToast(2500);
 
-  // Persist active tab across navigation
+  // When view changes, load library if needed
   useEffect(() => {
-    sessionStorage.setItem('visualMemory_view', view);
     if (view === 'library') {
       loadVisuals();
     }
@@ -61,20 +62,10 @@ const VisualMemory = () => {
 
   // On mount: restore the previously selected visual
   useEffect(() => {
-    const savedId = sessionStorage.getItem('visualMemory_selectedVisualId');
-    if (savedId) {
-      loadVisualDetail(savedId);
+    if (selectedVisualId) {
+      loadVisualDetail(selectedVisualId);
     }
   }, []);
-
-  // Persist the selected visual id so it survives navigation
-  useEffect(() => {
-    if (selectedVisual) {
-      sessionStorage.setItem('visualMemory_selectedVisualId', selectedVisual.id);
-    } else {
-      sessionStorage.removeItem('visualMemory_selectedVisualId');
-    }
-  }, [selectedVisual]);
 
   const loadVisuals = async () => {
     setLoadingLibrary(true);
@@ -94,6 +85,7 @@ const VisualMemory = () => {
       const response = await apiFetch(`/visuals/${visualId}`);
       const data = await response.json();
       setSelectedVisual(data);
+      setSelectedVisualId(visualId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load visual details');
     }
@@ -156,7 +148,6 @@ const VisualMemory = () => {
       setWord('');
       setError('');
       setSuccessMessage('Visual saved successfully!');
-      setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to save visual'
@@ -173,10 +164,10 @@ const VisualMemory = () => {
       setSavedVisuals(savedVisuals.filter((v) => v.id !== visualId));
       if (selectedVisual?.id === visualId) {
         setSelectedVisual(null);
+        setSelectedVisualId(null);
       }
       setPendingDeleteId(null);
       setSuccessMessage('Visual deleted!');
-      setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to delete visual'
@@ -234,22 +225,9 @@ const VisualMemory = () => {
                     disabled={loading}
                     className="language-select"
                   >
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="it">Italian</option>
-                    <option value="pt">Portuguese</option>
-                    <option value="ja">Japanese</option>
-                    <option value="zh-CN">Chinese (Simplified)</option>
-                    <option value="zh-TW">Chinese (Traditional)</option>
-                    <option value="ko">Korean</option>
-                    <option value="ru">Russian</option>
-                    <option value="ar">Arabic</option>
-                    <option value="hi">Hindi</option>
-                    <option value="nl">Dutch</option>
-                    <option value="pl">Polish</option>
-                    <option value="tr">Turkish</option>
+                    {LANGUAGE_OPTIONS.map(lang => (
+                      <option key={lang.value} value={lang.value}>{lang.label}</option>
+                    ))}
                   </select>
                 </div>
 

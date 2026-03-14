@@ -2,6 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileAudio, FileVideo, Languages, Loader2, CheckCircle2, AlertCircle, Save, Trash2 } from 'lucide-react';
 import './ResourceLearner.css';
 import { apiFetch } from '../utils/apiClient';
+import { useSessionStorage } from '../hooks/useSessionStorage';
+import { useToast } from '../hooks/useToast';
+import { SESSION_KEYS } from '../utils/sessionKeys';
+import { LANGUAGE_OPTIONS } from '../utils/languages';
 
 const ALLOWED_MIME_TYPES = new Set([
   'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
@@ -45,26 +49,17 @@ const ResourceLearner = () => {
   const [file, setFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [status, setStatus] = useState<string>(
-    () => sessionStorage.getItem('rl_status') || ''
-  );
-  const [transcript, setTranscript] = useState<TranscriptSegment[]>(() => {
-    const saved = sessionStorage.getItem('rl_transcript');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [status, setStatus] = useSessionStorage(SESSION_KEYS.resourceLearner.status, '');
+  const [transcript, setTranscript] = useSessionStorage<TranscriptSegment[]>(SESSION_KEYS.resourceLearner.transcript, []);
   const [currentTime, setCurrentTime] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState(
-    () => sessionStorage.getItem('rl_language') || ''
-  );
+  const [language, setLanguage] = useSessionStorage(SESSION_KEYS.resourceLearner.language, '');
   const [isSaving, setIsSaving] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null);
   const [savedResources, setSavedResources] = useState<SavedResource[]>([]);
   const [isLoadingSavedResources, setIsLoadingSavedResources] = useState(false);
-  const [mediaFileType, setMediaFileType] = useState<string | null>(
-    () => sessionStorage.getItem('rl_mediaFileType') || null
-  );
+  const [mediaFileType, setMediaFileType] = useSessionStorage<string | null>(SESSION_KEYS.resourceLearner.mediaFileType, null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [selectedResourceId, setSelectedResourceId] = useSessionStorage<string | null>(SESSION_KEYS.resourceLearner.selectedResourceId, null);
+  const { success, error, setSuccess, setError } = useToast();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -78,33 +73,21 @@ const ResourceLearner = () => {
 
   // On mount: restore media for the last-loaded saved resource
   useEffect(() => {
-    const savedId = sessionStorage.getItem('rl_selectedResourceId');
-    if (!savedId) return;
-    apiFetch(`/resources/media/${savedId}`)
+    if (!selectedResourceId) return;
+    let blobUrl: string | null = null;
+    let cancelled = false;
+    apiFetch(`/resources/media/${selectedResourceId}`)
       .then(res => res.ok ? res.blob() : null)
-      .then(blob => { if (blob) setMediaUrl(URL.createObjectURL(blob)); })
+      .then(blob => {
+        if (cancelled) { if (blobUrl) URL.revokeObjectURL(blobUrl); return; }
+        if (blob) { blobUrl = URL.createObjectURL(blob); setMediaUrl(blobUrl); }
+      })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, []);
-
-  // Persist transcript/media state across navigation
-  useEffect(() => {
-    if (transcript.length > 0) sessionStorage.setItem('rl_transcript', JSON.stringify(transcript));
-    else sessionStorage.removeItem('rl_transcript');
-  }, [transcript]);
-
-  useEffect(() => {
-    sessionStorage.setItem('rl_language', language);
-  }, [language]);
-
-  useEffect(() => {
-    if (mediaFileType) sessionStorage.setItem('rl_mediaFileType', mediaFileType);
-    else sessionStorage.removeItem('rl_mediaFileType');
-  }, [mediaFileType]);
-
-  useEffect(() => {
-    if (status) sessionStorage.setItem('rl_status', status);
-    else sessionStorage.removeItem('rl_status');
-  }, [status]);
 
   const loadSavedResources = async () => {
     setIsLoadingSavedResources(true);
@@ -144,9 +127,6 @@ const ResourceLearner = () => {
 
       await saveResponse.json();
       setSuccess('Resource saved successfully!');
-      setTimeout(() => setSuccess(null), 2000);
-
-      // Reload saved resources
       loadSavedResources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save resource');
@@ -156,7 +136,7 @@ const ResourceLearner = () => {
   };
 
   const loadResourceFromSaved = async (resourceId: string) => {
-    sessionStorage.setItem('rl_selectedResourceId', resourceId);
+    setSelectedResourceId(resourceId);
     try {
       const response = await apiFetch(`/resources/${resourceId}`);
       const data = await response.json();
@@ -197,7 +177,6 @@ const ResourceLearner = () => {
     try {
       await apiFetch(`/resources/${resourceId}`, { method: 'DELETE' });
       setSuccess('Resource deleted!');
-      setTimeout(() => setSuccess(null), 2000);
       loadSavedResources();
     } catch (err) {
       setError('Failed to delete resource');
@@ -215,7 +194,7 @@ const ResourceLearner = () => {
       }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
       // Local file upload — disassociate from any previously saved resource
-      sessionStorage.removeItem('rl_selectedResourceId');
+      setSelectedResourceId(null);
       setFile(selectedFile);
       setMediaFileType(null);
       setMediaUrl(URL.createObjectURL(selectedFile));
@@ -236,7 +215,7 @@ const ResourceLearner = () => {
       }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
       // Local file drop — disassociate from any previously saved resource
-      sessionStorage.removeItem('rl_selectedResourceId');
+      setSelectedResourceId(null);
       setFile(droppedFile);
       setMediaFileType(null);
       setMediaUrl(URL.createObjectURL(droppedFile));
@@ -356,16 +335,9 @@ const ResourceLearner = () => {
               className="language-dropdown"
             >
               <option value="">Auto-detect</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="zh">Chinese</option>
-              <option value="ru">Russian</option>
-              <option value="pt">Portuguese</option>
-              <option value="en">English</option>
+              {LANGUAGE_OPTIONS.map(lang => (
+                <option key={lang.value} value={lang.value}>{lang.label}</option>
+              ))}
             </select>
           </div>
 

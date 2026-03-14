@@ -50,6 +50,7 @@ htmlcov/
 
 # Database files
 *.db
+*.db*
 *.sqlite
 *.sqlite3
 
@@ -62,4 +63,5 @@ frontend/public/uploads/
 *.log
 *.tmp
 *.temp
+*.pem
 .cache/

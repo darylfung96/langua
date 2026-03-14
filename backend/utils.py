@@ -3,12 +3,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
-_TIMESTAMP_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc).isoformat()
-
-
-def format_timestamp(dt: Optional[datetime]) -> str:
-    """Format a datetime as ISO 8601. Returns Unix epoch string if dt is None."""
-    return dt.isoformat() if dt is not None else _TIMESTAMP_EPOCH
+def format_timestamp(dt: Optional[datetime]) -> Optional[str]:
+    """Format a datetime as ISO 8601. Returns None if dt is None."""
+    return dt.isoformat() if dt is not None else None
 
 
 def extract_video_id(youtube_url: str) -> str:

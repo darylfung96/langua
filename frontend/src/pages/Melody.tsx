@@ -4,9 +4,9 @@ import { YoutubeTranscript } from '../utils/YoutubeTranscript';
 import type { TranscriptSection } from '../utils/YoutubeTranscript';
 import { Search, Loader2, Music, Youtube, Play, ExternalLink, Save, Trash2 } from 'lucide-react';
 import { apiFetch } from '../utils/apiClient';
+import { LANGUAGE_OPTIONS } from '../utils/languages';
+import { useToast, TOAST_TIMEOUT_MS } from '../hooks/useToast';
 import './Melody.css';
-
-const TOAST_TIMEOUT_MS = 2000;
 
 interface SavedLyric {
   id: string;
@@ -20,8 +20,6 @@ const Melody = () => {
   const [videoId, setVideoId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSection[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -29,6 +27,7 @@ const Melody = () => {
   const [videoTitle, setVideoTitle] = useState('');
   const [language, setLanguage] = useState('en');
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const { success, error, setSuccess, setError } = useToast();
 
   const playerRef = useRef<ReactPlayer>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
@@ -69,8 +68,7 @@ const Melody = () => {
       setTranscript(data.segments);
       setLanguage(data.language);
       if (data.language !== requestedLang) {
-        setSuccess(`No ${requestedLang.toUpperCase()} subtitles found — showing ${data.language.toUpperCase()} instead.`);
-        setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS * 3);
+        setSuccess(`No ${requestedLang.toUpperCase()} subtitles found — showing ${data.language.toUpperCase()} instead.`, TOAST_TIMEOUT_MS * 3);
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch transcript. Ensure the video has subtitles.');
@@ -100,9 +98,6 @@ const Melody = () => {
       });
 
       setSuccess('Lyrics saved successfully!');
-      setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS);
-
-      // Reload saved lyrics
       loadSavedLyrics();
     } catch (err) {
       setError((err as Error).message || 'Failed to save lyric');
@@ -136,7 +131,6 @@ const Melody = () => {
     try {
       await apiFetch(`/lyrics/${lyricId}`, { method: 'DELETE' });
       setSuccess('Lyric deleted!');
-      setTimeout(() => setSuccess(null), 2000);
       loadSavedLyrics();
     } catch (err) {
       setError('Failed to delete lyric');
@@ -211,18 +205,9 @@ const Melody = () => {
             title="Select transcript language"
             aria-label="Transcript language"
           >
-            <option value="en">English</option>
-            <option value="fr">French</option>
-            <option value="ja">Japanese</option>
-            <option value="zh-TW">Chinese (Traditional)</option>
-            <option value="zh-CN">Chinese (Simplified)</option>
-            <option value="ko">Korean</option>
-            <option value="es">Spanish</option>
-            <option value="de">German</option>
-            <option value="it">Italian</option>
-            <option value="pt">Portuguese</option>
-            <option value="ru">Russian</option>
-            <option value="ar">Arabic</option>
+            {LANGUAGE_OPTIONS.map(lang => (
+              <option key={lang.value} value={lang.value}>{lang.label}</option>
+            ))}
           </select>
           <button
             className="fetch-btn"
@@ -286,7 +271,7 @@ const Melody = () => {
                   playing={isPlaying}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
-                  onProgress={handleProgress as any}
+                  onProgress={handleProgress}
                 />
               ) : (
                 <div className="empty-state">

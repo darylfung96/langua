@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
 import logging
@@ -13,16 +13,21 @@ from utils import format_timestamp
 from services.resource_service import (
     save_resource as save_resource_db,
     get_all_resources as get_all_resources_db,
+    count_resources as count_resources_db,
     get_resource_by_id as get_resource_by_id_db,
     delete_resource as delete_resource_db,
 )
 from file_storage import get_media_file_path, validate_media_file
+from limiter import limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["resources"])
 
 
 @router.post("")
+@limiter.limit("30/minute", key_func=get_remote_address)
 async def save_resource(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     title: str = Form(...),
@@ -72,6 +77,7 @@ async def get_all_resources(
     """Fetch saved resources with optional pagination."""
     try:
         resources = get_all_resources_db(db, current_user.id, limit=limit, offset=offset)
+        total = count_resources_db(db, current_user.id)
         return JSONResponse(content={
             "resources": [
                 SavedResourceListItem(
@@ -85,6 +91,7 @@ async def get_all_resources(
                 ).model_dump()
                 for resource in resources
             ],
+            "total": total,
             "limit": limit,
             "offset": offset,
         })
@@ -139,7 +146,9 @@ async def get_media(
 
 
 @router.delete("/{resource_id}")
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def delete_resource(
+    request: Request,
     resource_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

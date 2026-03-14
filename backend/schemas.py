@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 from pydantic import BaseModel, field_validator, EmailStr, Field, model_validator
 from typing import Any, List, Optional
 
@@ -16,10 +17,11 @@ from constants import (
     MAX_FILE_NAME_LENGTH,
     MAX_FILE_TYPE_LENGTH,
     LANGUAGE_PATTERN,
+    DANGEROUS_CHARS_PATTERN,
 )
 
-# Maximum base64-encoded audio size (overrides constant if needed)
-_MAX_AUDIO_B64_CHARS = 90_000_000
+# Import centralized HTML sanitization
+from sanitization import sanitize_html
 
 # Language code validation regex
 _language_regex = re.compile(LANGUAGE_PATTERN)
@@ -30,18 +32,6 @@ def _validate_language(v: str) -> str:
         raise ValueError("Language is required")
     if not _language_regex.match(v):
         raise ValueError(f"Invalid language format: {v}. Use format like 'en', 'en-US', 'zh-CN'")
-    return v
-
-def _sanitize_html(v: str) -> str:
-    """Basic HTML sanitization - strips script tags and event handlers."""
-    if not v:
-        return v
-    # Remove script tags
-    v = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', v, flags=re.IGNORECASE | re.DOTALL)
-    # Remove event handlers like onclick, onerror, etc.
-    v = re.sub(r'\s+on\w+\s*=\s*["\'][^"\']*["\']', '', v, flags=re.IGNORECASE)
-    # Remove javascript: URLs
-    v = re.sub(r'javascript\s*:', '', v, flags=re.IGNORECASE)
     return v
 
 
@@ -56,7 +46,7 @@ class VocabWord(BaseModel):
 # ---------------------------------------------------------------------------
 
 class UserRegister(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -105,7 +95,7 @@ class StoryRequest(BaseModel):
     @classmethod
     def sanitize_story_content(cls, v: str) -> str:
         """Sanitize HTML to prevent XSS if content is rendered in frontend."""
-        return _sanitize_html(v)
+        return sanitize_html(v)
 
 
 class LyricRequest(BaseModel):
@@ -170,8 +160,8 @@ class VisualRequest(BaseModel):
         # Limit word length (already via Field, but add content check)
         if len(v) > 100:
             raise ValueError("Word is too long (max 100 characters)")
-        # Prevent HTML/script in word
-        if re.search(r'[<>"\'&]', v):
+        # Check for dangerous characters before sanitization
+        if re.search(DANGEROUS_CHARS_PATTERN, v):
             raise ValueError("Word contains invalid characters")
         return v.strip()
 

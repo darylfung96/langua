@@ -14,6 +14,7 @@ from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE, TEMP_DIR, TRANSC
 from database import User
 from security import get_current_user
 from limiter import limiter
+from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["transcription"])
@@ -21,6 +22,9 @@ router = APIRouter(tags=["transcription"])
 # Initialize faster-whisper model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 COMPUTE_TYPE = "float16" if torch.cuda.is_available() else "int8"
+
+# Module-level lock so concurrent requests don't run Whisper inference simultaneously
+_whisper_lock = asyncio.Lock()
 
 try:
     model = WhisperModel(WHISPER_MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
@@ -32,7 +36,7 @@ SUPPORTED_FORMATS = (".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".mkv", ".
 
 
 @router.post("/transcribe")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def transcribe(
     request: Request,
     file: UploadFile = File(...),
@@ -56,21 +60,22 @@ async def transcribe(
         with tempfile.TemporaryDirectory(dir=TEMP_DIR) as tmpdir:
             temp_path = os.path.join(tmpdir, f"audio{file_ext}")
 
-            async with asyncio.Lock():
-                with open(temp_path, "wb") as buffer:
-                    await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
+            with open(temp_path, "wb") as buffer:
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
-            # Apply timeout to the transcribe operation
-            segments, info = await asyncio.wait_for(
-                run_in_threadpool(
-                    model.transcribe,
-                    temp_path,
-                    beam_size=5,
-                    language=language if language else None,
-                    word_timestamps=True
-                ),
-                timeout=TRANSCRIBE_TIMEOUT
-            )
+            # Serialize Whisper inference via module-level lock to prevent
+            # concurrent GPU/CPU memory contention.
+            async with _whisper_lock:
+                segments, info = await asyncio.wait_for(
+                    run_in_threadpool(
+                        model.transcribe,
+                        temp_path,
+                        beam_size=5,
+                        language=language if language else None,
+                        word_timestamps=True
+                    ),
+                    timeout=TRANSCRIBE_TIMEOUT
+                )
 
             all_segments = []
             all_text_parts = []

@@ -3,6 +3,7 @@ Gemini AI story and audio generation endpoints.
 Handles story generation and TTS audio — keeps the API key server-side.
 """
 import asyncio
+import base64
 import json
 import logging
 import re
@@ -18,29 +19,18 @@ from database import User
 from gemini_client import get_gemini_client
 from gemini_tts import generate_tts
 from limiter import limiter
+from slowapi.util import get_remote_address
+from constants import LANGUAGE_NAMES, DANGEROUS_CHARS_PATTERN
+from sanitization import sanitize_html
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["story-generation"])
 
-# Language code to display name mapping
-LANGUAGE_NAMES = {
-    'es': 'Spanish',
-    'fr': 'French',
-    'de': 'German',
-    'it': 'Italian',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'zh-CN': 'Chinese (Simplified)',
-    'zh-TW': 'Chinese (Traditional)',
-    'ru': 'Russian',
-    'pt': 'Portuguese',
-    'en': 'English',
-    'ar': 'Arabic',
-}
-
 
 def _sanitize_json_text(text: str) -> str:
     """Strip markdown fences and fix invalid JSON escape sequences from AI responses."""
+    if not text:
+        raise ValueError("Empty AI response")
     text = text.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -80,7 +70,7 @@ class StoryGenRequest(BaseModel):
     @classmethod
     def validate_words(cls, v: str) -> str:
         # Basic sanitization - prevent script injection in words list
-        if re.search(r'[<>"\'&]', v):
+        if re.search(DANGEROUS_CHARS_PATTERN, v):
             raise ValueError("Words contain invalid characters")
         return v
 
@@ -99,7 +89,7 @@ class AudioGenRequest(BaseModel):
     @classmethod
     def sanitize_story(cls, v: str) -> str:
         """Sanitize HTML tags from story."""
-        return re.sub(r'<[^>]+>', '', v)
+        return sanitize_html(v)
 
 
 class QuizGenRequest(BaseModel):
@@ -114,7 +104,7 @@ class QuizGenRequest(BaseModel):
 
 
 @router.post("/generate-quiz")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def generate_quiz(
     request: Request,
     body: QuizGenRequest,
@@ -127,7 +117,7 @@ async def generate_quiz(
         # Get display name for the language
         language_display = LANGUAGE_NAMES.get(body.language, body.language)
 
-        clean_story = re.sub(r"<[^>]+>", "", body.story)
+        clean_story = sanitize_html(body.story)
         vocab_list = ", ".join(
             f"{v.get('word', '')} = {v.get('equivalent_in_english', '')}"
             for v in body.vocabulary
@@ -189,7 +179,7 @@ async def generate_quiz(
 
 
 @router.post("/generate-story")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def generate_story(
     request: Request,
     body: StoryGenRequest,
@@ -248,7 +238,7 @@ async def generate_story(
 
 
 @router.post("/generate-audio")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def generate_audio(
     request: Request,
     body: AudioGenRequest,
@@ -264,7 +254,6 @@ async def generate_audio(
         )
 
         # Encode audio bytes to base64 for JSON transport
-        import base64
         audio_data_b64 = base64.b64encode(audio_bytes).decode('utf-8')
 
         return JSONResponse(content={

@@ -7,11 +7,9 @@ from database import Story
 from schemas import StoryRequest
 from file_storage import save_media_file, delete_media_file
 from services.base_service import BaseService
+from constants import MAX_AUDIO_BASE64_LENGTH
 
 logger = logging.getLogger(__name__)
-
-
-MAX_AUDIO_BASE64_BYTES = 70_000_000  # ~50 MB binary after base64 encoding (base64 ≈ 1.37× input)
 
 
 class StoryService(BaseService[Story]):
@@ -26,7 +24,7 @@ class StoryService(BaseService[Story]):
         try:
             json.loads(story_data.vocabulary)  # validate JSON
 
-            if story_data.audio and len(story_data.audio) > MAX_AUDIO_BASE64_BYTES:
+            if story_data.audio and len(story_data.audio) > MAX_AUDIO_BASE64_LENGTH:
                 raise ValueError("Audio file too large (maximum 50 MB)")
 
             story = Story(
@@ -86,6 +84,10 @@ def save_story(story_data: StoryRequest, db: Session, user_id: str) -> Story:
 
 def get_all_stories(db: Session, user_id: str, limit: int | None = None, offset: int = 0) -> list:
     return _service.get_all(db, user_id, limit=limit, offset=offset)
+
+
+def count_stories(db: Session, user_id: str) -> int:
+    return _service.count(db, user_id)
 
 
 def get_story_by_id(story_id: str, db: Session, user_id: str) -> Story:

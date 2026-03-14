@@ -1,37 +1,48 @@
 import asyncio
 import os
+import re
 import uuid
 import base64
 import logging
 import tempfile
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from fastapi.responses import JSONResponse
 
 from config import TEMP_DIR, AI_REQUEST_TIMEOUT
+from constants import LANGUAGE_NAMES, MAX_WORD_LENGTH, MAX_LANGUAGE_LENGTH, LANGUAGE_PATTERN
 from database import User
 from security import get_current_user
 from gemini_client import get_gemini_client
 from limiter import limiter
+from slowapi.util import get_remote_address
 from utils import generate_creative_prompt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["image-generation"])
 
+_language_re = re.compile(LANGUAGE_PATTERN)
+_word_re = re.compile(r'^[^<>"\'&]+$')
+
 
 @router.post("/generate-image")
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_remote_address)
 async def generate_image(
     request: Request,
-    word: str,
-    language: str = "en",
+    word: str = Query(..., min_length=1, max_length=MAX_WORD_LENGTH, description="Word to visualize"),
+    language: str = Query("en", min_length=2, max_length=MAX_LANGUAGE_LENGTH, description="BCP 47 language code"),
     current_user: User = Depends(get_current_user)
 ):
     """Generate a memorable image for a word in a specific language."""
-    if not word or not word.strip():
+    word = word.strip()
+    if not word:
         raise HTTPException(status_code=400, detail="Word cannot be empty")
+    if not _word_re.match(word):
+        raise HTTPException(status_code=400, detail="Word contains invalid characters")
+    if not _language_re.match(language):
+        raise HTTPException(status_code=400, detail="Invalid language code format")
 
     try:
-        creative_prompt = generate_creative_prompt(word.strip(), language)
+        creative_prompt = generate_creative_prompt(word, language)
 
         # Get or initialize the Gemini client (lazy initialization)
         client = await get_gemini_client()

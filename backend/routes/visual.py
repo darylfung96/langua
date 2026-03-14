@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
@@ -12,15 +12,20 @@ from utils import format_timestamp
 from services.visual_service import (
     save_visual as save_visual_db,
     get_all_visuals as get_all_visuals_db,
+    count_visuals as count_visuals_db,
     get_visual_by_id as get_visual_by_id_db,
     delete_visual as delete_visual_db,
 )
+from limiter import limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["visuals"])
 
 
 @router.post("")
+@limiter.limit("30/minute", key_func=get_remote_address)
 async def save_visual(
+    request: Request,
     visual_data: VisualRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -51,6 +56,7 @@ async def get_all_visuals(
     """Fetch saved visuals with optional pagination."""
     try:
         visuals = get_all_visuals_db(db, current_user.id, limit=limit, offset=offset)
+        total = count_visuals_db(db, current_user.id)
         return JSONResponse(content={
             "visuals": [
                 SavedVisualListItem(
@@ -62,6 +68,7 @@ async def get_all_visuals(
                 ).model_dump()
                 for visual in visuals
             ],
+            "total": total,
             "limit": limit,
             "offset": offset,
         })
@@ -88,7 +95,9 @@ async def get_visual(
 
 
 @router.delete("/{visual_id}")
+@limiter.limit("20/minute", key_func=get_remote_address)
 async def delete_visual(
+    request: Request,
     visual_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

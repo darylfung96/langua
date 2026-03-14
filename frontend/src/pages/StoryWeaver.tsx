@@ -2,9 +2,12 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Sparkles, Play, Pause, BookOpen, Volume2, Loader2, Save, Trash2, Brain, RefreshCw, CheckCircle2, XCircle, Trophy } from 'lucide-react';
 import './StoryWeaver.css';
 import { apiFetch } from '../utils/apiClient';
+import { useSessionStorage } from '../hooks/useSessionStorage';
+import { useToast } from '../hooks/useToast';
+import { SESSION_KEYS } from '../utils/sessionKeys';
+import { LANGUAGE_OPTIONS } from '../utils/languages';
 
 const AUDIO_SAMPLE_RATE = 24000;
-const TOAST_TIMEOUT_MS = 2000;
 
 interface VocabWord {
   word: string;
@@ -95,45 +98,28 @@ const LANGUAGES = {
   'ar': 'Arabic',
 } as const;
 
+/** Validates that an audio_file_path from the server matches the expected upload format. */
+const AUDIO_PATH_RE = /^uploads\/[0-9a-f]{16}_[\w\- ]{0,50}\.[a-z0-9]{2,5}$/;
+
 const StoryWeaver = () => {
-  const [language, setLanguage] = useState(
-    () => sessionStorage.getItem('sw_language') || 'fr'
-  );
-  const [inputWords, setInputWords] = useState(
-    () => sessionStorage.getItem('sw_inputWords') || ''
-  );
+  const [language, setLanguage] = useSessionStorage(SESSION_KEYS.storyWeaver.language, 'fr');
+  const [inputWords, setInputWords] = useSessionStorage(SESSION_KEYS.storyWeaver.inputWords, '');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [storyData, setStoryData] = useState<StoryResponse | null>(() => {
-    const saved = sessionStorage.getItem('sw_storyData');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [storyData, setStoryData] = useSessionStorage<StoryResponse | null>(SESSION_KEYS.storyWeaver.storyData, null);
   const [isSaving, setIsSaving] = useState(false);
   const [savedStories, setSavedStories] = useState<SavedStory[]>([]);
   const [isLoadingSavedStories, setIsLoadingSavedStories] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const { success, error, setSuccess, setError } = useToast();
 
   // Quiz state
-  const [quizData, setQuizData] = useState<QuizData | null>(() => {
-    const saved = sessionStorage.getItem('sw_quizData');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [quizData, setQuizData] = useSessionStorage<QuizData | null>(SESSION_KEYS.storyWeaver.quizData, null);
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
-  const [userAnswers, setUserAnswers] = useState<Record<number, string>>(() => {
-    const saved = sessionStorage.getItem('sw_userAnswers');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [fillBlankInputs, setFillBlankInputs] = useState<Record<number, string>>(() => {
-    const saved = sessionStorage.getItem('sw_fillBlankInputs');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [quizSubmitted, setQuizSubmitted] = useState(
-    () => sessionStorage.getItem('sw_quizSubmitted') === 'true'
-  );
-  const [quizScore, setQuizScore] = useState(
-    () => Number(sessionStorage.getItem('sw_quizScore') || '0')
-  );
+  const [userAnswers, setUserAnswers] = useSessionStorage<Record<number, string>>(SESSION_KEYS.storyWeaver.userAnswers, {});
+  const [fillBlankInputs, setFillBlankInputs] = useSessionStorage<Record<number, string>>(SESSION_KEYS.storyWeaver.fillBlankInputs, {});
+  const [quizSubmitted, setQuizSubmitted] = useSessionStorage(SESSION_KEYS.storyWeaver.quizSubmitted, false);
+  const [quizScore, setQuizScore] = useSessionStorage(SESSION_KEYS.storyWeaver.quizScore, 0);
+  const [selectedStoryId, setSelectedStoryId] = useSessionStorage<string | null>(SESSION_KEYS.storyWeaver.selectedStoryId, null);
 
   // Audio state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -150,54 +136,27 @@ const StoryWeaver = () => {
 
   // On mount: restore audio for the last-loaded saved story
   useEffect(() => {
-    const savedId = sessionStorage.getItem('sw_selectedStoryId');
-    if (!savedId) return;
-    apiFetch(`/stories/${savedId}`)
+    if (!selectedStoryId) return;
+    let blobUrl: string | null = null;
+    let cancelled = false;
+    apiFetch(`/stories/${selectedStoryId}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data?.audio_file_path) {
+        if (data?.audio_file_path && AUDIO_PATH_RE.test(data.audio_file_path)) {
           return apiFetch(`/${data.audio_file_path}`)
             .then(r => r.ok ? r.blob() : null)
-            .then(blob => { if (blob) setAudioUrl(URL.createObjectURL(blob)); });
+            .then(blob => {
+              if (cancelled) { if (blobUrl) URL.revokeObjectURL(blobUrl); return; }
+              if (blob) { blobUrl = URL.createObjectURL(blob); setAudioUrl(blobUrl); }
+            });
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, []);
-
-  // Persist story/quiz state across navigation
-  useEffect(() => {
-    sessionStorage.setItem('sw_language', language);
-  }, [language]);
-
-  useEffect(() => {
-    sessionStorage.setItem('sw_inputWords', inputWords);
-  }, [inputWords]);
-
-  useEffect(() => {
-    if (storyData) sessionStorage.setItem('sw_storyData', JSON.stringify(storyData));
-    else sessionStorage.removeItem('sw_storyData');
-  }, [storyData]);
-
-  useEffect(() => {
-    if (quizData) sessionStorage.setItem('sw_quizData', JSON.stringify(quizData));
-    else sessionStorage.removeItem('sw_quizData');
-  }, [quizData]);
-
-  useEffect(() => {
-    sessionStorage.setItem('sw_userAnswers', JSON.stringify(userAnswers));
-  }, [userAnswers]);
-
-  useEffect(() => {
-    sessionStorage.setItem('sw_fillBlankInputs', JSON.stringify(fillBlankInputs));
-  }, [fillBlankInputs]);
-
-  useEffect(() => {
-    sessionStorage.setItem('sw_quizSubmitted', String(quizSubmitted));
-  }, [quizSubmitted]);
-
-  useEffect(() => {
-    sessionStorage.setItem('sw_quizScore', String(quizScore));
-  }, [quizScore]);
 
   const loadSavedStories = async () => {
     setIsLoadingSavedStories(true);
@@ -261,19 +220,16 @@ const StoryWeaver = () => {
 
       await saveResponse.json();
       setSuccess('Story saved successfully!');
-      setTimeout(() => setSuccess(null), TOAST_TIMEOUT_MS);
-
-      // Reload saved stories
       loadSavedStories();
     } catch (err) {
-      setError((err as Error).message || 'Failed to save story');
+      setError(err instanceof Error ? err.message : 'Failed to save story');
     } finally {
       setIsSaving(false);
     }
   };
 
   const loadStoryFromSaved = async (storyId: string) => {
-    sessionStorage.setItem('sw_selectedStoryId', storyId);
+    setSelectedStoryId(storyId);
     try {
       const response = await apiFetch(`/stories/${storyId}`);
       if (!response.ok) throw new Error('Failed to load story');
@@ -296,7 +252,7 @@ const StoryWeaver = () => {
         setQuizData(null);
       }
       // Set audio URL from saved data if available
-      if (data.audio_file_path) {
+      if (data.audio_file_path && AUDIO_PATH_RE.test(data.audio_file_path)) {
         apiFetch(`/${data.audio_file_path}`)
           .then(res => {
             if (!res.ok) throw new Error('Failed to load audio');
@@ -436,7 +392,7 @@ const StoryWeaver = () => {
     if (!inputWords.trim()) return;
 
     // Fresh generation — no saved story is active anymore
-    sessionStorage.removeItem('sw_selectedStoryId');
+    setSelectedStoryId(null);
 
     setIsGenerating(true);
     setStoryData(null);
@@ -629,15 +585,9 @@ const StoryWeaver = () => {
                   cursor: 'pointer'
                 }}
               >
-                <option value="es" style={{ color: 'black' }}>Spanish</option>
-                <option value="fr" style={{ color: 'black' }}>French</option>
-                <option value="de" style={{ color: 'black' }}>German</option>
-                <option value="it" style={{ color: 'black' }}>Italian</option>
-                <option value="ja" style={{ color: 'black' }}>Japanese</option>
-                <option value="ko" style={{ color: 'black' }}>Korean</option>
-                <option value="zh-CN" style={{ color: 'black' }}>Chinese (Simplified)</option>
-                <option value="ru" style={{ color: 'black' }}>Russian</option>
-                <option value="pt" style={{ color: 'black' }}>Portuguese</option>
+                {LANGUAGE_OPTIONS.map(lang => (
+                  <option key={lang.value} value={lang.value} style={{ color: 'black' }}>{lang.label}</option>
+                ))}
               </select>
             </div>
             <div className="input-group">

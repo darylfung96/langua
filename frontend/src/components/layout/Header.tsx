@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 // import { BookOpen, Music, Mic2, Image as ImageIcon, PenTool, LayoutDashboard, Volume2 } from 'lucide-react';
-import { BookOpen, Music, Image as ImageIcon, LayoutDashboard, Volume2, LogOut } from 'lucide-react';
+import { BookOpen, Music, Mic2, Image as ImageIcon, LayoutDashboard, Volume2, LogOut } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import './Header.css';
 
@@ -21,7 +21,7 @@ const Header = () => {
     { path: '/story-weaver', label: 'Story Weaver', icon: <BookOpen size={20} /> },
     { path: '/melody', label: 'YouTube Learner', icon: <Music size={20} /> },
     { path: '/resource-learner', label: 'Resource Learner', icon: <Volume2 size={20} /> },
-    // { path: '/podcasts', label: 'Podcast Pro', icon: <Mic2 size={20} /> },
+    { path: '/podcasts', label: 'Shadowing', icon: <Mic2 size={20} /> },
     { path: '/visual-memory', label: 'Visuals', icon: <ImageIcon size={20} /> },
     // { path: '/writing', label: 'Journal', icon: <PenTool size={20} /> },
   ];

@@ -19,12 +19,12 @@ const modules = [
     color: 'var(--accent-secondary)'
   },
   {
-    title: 'Podcast Pro',
-    description: 'Acoustic practice. Perfect your pronunciation by shadowing natives.',
+    title: 'Shadowing',
+    description: 'Shadowing practice. Improve pronunciation by repeating phrases in real-time.',
     icon: <Mic2 size={32} />,
     path: '/podcasts',
     color: 'var(--accent-warning)',
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: 'Visual Memory',
