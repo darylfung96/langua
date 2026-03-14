@@ -45,16 +45,25 @@ const ResourceLearner = () => {
   const [file, setFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [status, setStatus] = useState<string>('');
-  const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [status, setStatus] = useState<string>(
+    () => sessionStorage.getItem('rl_status') || ''
+  );
+  const [transcript, setTranscript] = useState<TranscriptSegment[]>(() => {
+    const saved = sessionStorage.getItem('rl_transcript');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState('');
+  const [language, setLanguage] = useState(
+    () => sessionStorage.getItem('rl_language') || ''
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [savedResources, setSavedResources] = useState<SavedResource[]>([]);
   const [isLoadingSavedResources, setIsLoadingSavedResources] = useState(false);
-  const [mediaFileType, setMediaFileType] = useState<string | null>(null);
+  const [mediaFileType, setMediaFileType] = useState<string | null>(
+    () => sessionStorage.getItem('rl_mediaFileType') || null
+  );
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -66,6 +75,36 @@ const ResourceLearner = () => {
   useEffect(() => {
     loadSavedResources();
   }, []);
+
+  // On mount: restore media for the last-loaded saved resource
+  useEffect(() => {
+    const savedId = sessionStorage.getItem('rl_selectedResourceId');
+    if (!savedId) return;
+    apiFetch(`/resources/media/${savedId}`)
+      .then(res => res.ok ? res.blob() : null)
+      .then(blob => { if (blob) setMediaUrl(URL.createObjectURL(blob)); })
+      .catch(() => {});
+  }, []);
+
+  // Persist transcript/media state across navigation
+  useEffect(() => {
+    if (transcript.length > 0) sessionStorage.setItem('rl_transcript', JSON.stringify(transcript));
+    else sessionStorage.removeItem('rl_transcript');
+  }, [transcript]);
+
+  useEffect(() => {
+    sessionStorage.setItem('rl_language', language);
+  }, [language]);
+
+  useEffect(() => {
+    if (mediaFileType) sessionStorage.setItem('rl_mediaFileType', mediaFileType);
+    else sessionStorage.removeItem('rl_mediaFileType');
+  }, [mediaFileType]);
+
+  useEffect(() => {
+    if (status) sessionStorage.setItem('rl_status', status);
+    else sessionStorage.removeItem('rl_status');
+  }, [status]);
 
   const loadSavedResources = async () => {
     setIsLoadingSavedResources(true);
@@ -117,6 +156,7 @@ const ResourceLearner = () => {
   };
 
   const loadResourceFromSaved = async (resourceId: string) => {
+    sessionStorage.setItem('rl_selectedResourceId', resourceId);
     try {
       const response = await apiFetch(`/resources/${resourceId}`);
       const data = await response.json();
@@ -174,6 +214,8 @@ const ResourceLearner = () => {
         return;
       }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+      // Local file upload — disassociate from any previously saved resource
+      sessionStorage.removeItem('rl_selectedResourceId');
       setFile(selectedFile);
       setMediaFileType(null);
       setMediaUrl(URL.createObjectURL(selectedFile));
@@ -193,6 +235,8 @@ const ResourceLearner = () => {
         return;
       }
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+      // Local file drop — disassociate from any previously saved resource
+      sessionStorage.removeItem('rl_selectedResourceId');
       setFile(droppedFile);
       setMediaFileType(null);
       setMediaUrl(URL.createObjectURL(droppedFile));

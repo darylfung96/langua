@@ -96,10 +96,17 @@ const LANGUAGES = {
 } as const;
 
 const StoryWeaver = () => {
-  const [language, setLanguage] = useState('fr');
-  const [inputWords, setInputWords] = useState('');
+  const [language, setLanguage] = useState(
+    () => sessionStorage.getItem('sw_language') || 'fr'
+  );
+  const [inputWords, setInputWords] = useState(
+    () => sessionStorage.getItem('sw_inputWords') || ''
+  );
   const [isGenerating, setIsGenerating] = useState(false);
-  const [storyData, setStoryData] = useState<StoryResponse | null>(null);
+  const [storyData, setStoryData] = useState<StoryResponse | null>(() => {
+    const saved = sessionStorage.getItem('sw_storyData');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -108,12 +115,25 @@ const StoryWeaver = () => {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // Quiz state
-  const [quizData, setQuizData] = useState<QuizData | null>(null);
+  const [quizData, setQuizData] = useState<QuizData | null>(() => {
+    const saved = sessionStorage.getItem('sw_quizData');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
-  const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
-  const [fillBlankInputs, setFillBlankInputs] = useState<Record<number, string>>({});
-  const [quizSubmitted, setQuizSubmitted] = useState(false);
-  const [quizScore, setQuizScore] = useState(0);
+  const [userAnswers, setUserAnswers] = useState<Record<number, string>>(() => {
+    const saved = sessionStorage.getItem('sw_userAnswers');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [fillBlankInputs, setFillBlankInputs] = useState<Record<number, string>>(() => {
+    const saved = sessionStorage.getItem('sw_fillBlankInputs');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [quizSubmitted, setQuizSubmitted] = useState(
+    () => sessionStorage.getItem('sw_quizSubmitted') === 'true'
+  );
+  const [quizScore, setQuizScore] = useState(
+    () => Number(sessionStorage.getItem('sw_quizScore') || '0')
+  );
 
   // Audio state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -127,6 +147,57 @@ const StoryWeaver = () => {
   useEffect(() => {
     loadSavedStories();
   }, []);
+
+  // On mount: restore audio for the last-loaded saved story
+  useEffect(() => {
+    const savedId = sessionStorage.getItem('sw_selectedStoryId');
+    if (!savedId) return;
+    apiFetch(`/stories/${savedId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.audio_file_path) {
+          return apiFetch(`/${data.audio_file_path}`)
+            .then(r => r.ok ? r.blob() : null)
+            .then(blob => { if (blob) setAudioUrl(URL.createObjectURL(blob)); });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Persist story/quiz state across navigation
+  useEffect(() => {
+    sessionStorage.setItem('sw_language', language);
+  }, [language]);
+
+  useEffect(() => {
+    sessionStorage.setItem('sw_inputWords', inputWords);
+  }, [inputWords]);
+
+  useEffect(() => {
+    if (storyData) sessionStorage.setItem('sw_storyData', JSON.stringify(storyData));
+    else sessionStorage.removeItem('sw_storyData');
+  }, [storyData]);
+
+  useEffect(() => {
+    if (quizData) sessionStorage.setItem('sw_quizData', JSON.stringify(quizData));
+    else sessionStorage.removeItem('sw_quizData');
+  }, [quizData]);
+
+  useEffect(() => {
+    sessionStorage.setItem('sw_userAnswers', JSON.stringify(userAnswers));
+  }, [userAnswers]);
+
+  useEffect(() => {
+    sessionStorage.setItem('sw_fillBlankInputs', JSON.stringify(fillBlankInputs));
+  }, [fillBlankInputs]);
+
+  useEffect(() => {
+    sessionStorage.setItem('sw_quizSubmitted', String(quizSubmitted));
+  }, [quizSubmitted]);
+
+  useEffect(() => {
+    sessionStorage.setItem('sw_quizScore', String(quizScore));
+  }, [quizScore]);
 
   const loadSavedStories = async () => {
     setIsLoadingSavedStories(true);
@@ -202,6 +273,7 @@ const StoryWeaver = () => {
   };
 
   const loadStoryFromSaved = async (storyId: string) => {
+    sessionStorage.setItem('sw_selectedStoryId', storyId);
     try {
       const response = await apiFetch(`/stories/${storyId}`);
       if (!response.ok) throw new Error('Failed to load story');
@@ -362,6 +434,9 @@ const StoryWeaver = () => {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputWords.trim()) return;
+
+    // Fresh generation — no saved story is active anymore
+    sessionStorage.removeItem('sw_selectedStoryId');
 
     setIsGenerating(true);
     setStoryData(null);
