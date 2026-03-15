@@ -3,9 +3,9 @@ import logging
 import base64
 from sqlalchemy.orm import Session
 
-from database import Story
+from db import Story
 from schemas import StoryRequest
-from file_storage import save_media_file, delete_media_file
+from core.file_storage import save_media_file, delete_media_file
 from services.base_service import BaseService
 from constants import MAX_AUDIO_BASE64_LENGTH
 

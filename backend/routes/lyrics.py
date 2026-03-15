@@ -5,10 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from database import get_db, User
+from db import get_db, User
 from schemas import LyricRequest, LyricDetailResponse, SavedLyricListItem
-from security import get_current_user
-from utils import format_timestamp
+from core.security import get_current_user
+from core.utils import format_timestamp
 from services.lyric_service import (
     save_lyric as save_lyric_db,
     get_all_lyrics as get_all_lyrics_db,
@@ -16,7 +16,7 @@ from services.lyric_service import (
     get_lyric_by_id as get_lyric_by_id_db,
     delete_lyric as delete_lyric_db,
 )
-from limiter import limiter
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["lyrics"])

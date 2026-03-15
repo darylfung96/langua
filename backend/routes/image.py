@@ -10,12 +10,12 @@ from fastapi.responses import JSONResponse
 
 from config import TEMP_DIR, AI_REQUEST_TIMEOUT
 from constants import LANGUAGE_NAMES, MAX_WORD_LENGTH, MAX_LANGUAGE_LENGTH, LANGUAGE_PATTERN
-from database import User
-from security import get_current_user
-from gemini_client import get_gemini_client
-from limiter import limiter
+from db import User
+from core.security import get_current_user
+from clients.gemini import get_gemini_client
+from core.limiter import limiter
 from slowapi.util import get_remote_address
-from utils import generate_creative_prompt
+from core.utils import generate_creative_prompt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["image-generation"])

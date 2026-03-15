@@ -7,8 +7,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     https: {
-      key: path.resolve('../backend/key.pem'),
-      cert: path.resolve('../backend/cert.pem'),
+      key: path.resolve('../backend/certs/key.pem'),
+      cert: path.resolve('../backend/certs/cert.pem'),
     },
     port: 5173,
     host: '0.0.0.0',  // Allow connections from other devices on your network

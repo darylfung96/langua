@@ -14,14 +14,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from config import AI_REQUEST_TIMEOUT
-from security import get_current_user
-from database import User, get_db, ShadowingSession, ShadowingAttempt
-from gemini_client import get_gemini_client
-from tts_client import generate_tts_audio
-from limiter import limiter
+from core.security import get_current_user
+from db import User, get_db, ShadowingSession, ShadowingAttempt
+from clients.gemini import get_gemini_client
+from clients.tts import generate_tts_audio
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 from constants import LANGUAGE_NAMES, LANGUAGE_PATTERN, DANGEROUS_CHARS_PATTERN
-from sanitization import sanitize_html
+from core.sanitization import sanitize_html
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["shadowing"])

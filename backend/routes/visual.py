@@ -5,10 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from database import get_db, User
+from db import get_db, User
 from schemas import VisualRequest, VisualDetailResponse, SavedVisualListItem
-from security import get_current_user
-from utils import format_timestamp
+from core.security import get_current_user
+from core.utils import format_timestamp
 from services.visual_service import (
     save_visual as save_visual_db,
     get_all_visuals as get_all_visuals_db,
@@ -16,7 +16,7 @@ from services.visual_service import (
     get_visual_by_id as get_visual_by_id_db,
     delete_visual as delete_visual_db,
 )
-from limiter import limiter
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["visuals"])

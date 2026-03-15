@@ -5,9 +5,9 @@ from fastapi.concurrency import run_in_threadpool
 from youtube_transcript_api import YouTubeTranscriptApi
 from typing import List, Optional
 
-from security import get_current_user
-from database import User
-from utils import extract_video_id, validate_video_id
+from core.security import get_current_user
+from db import User
+from core.utils import extract_video_id, validate_video_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["youtube"])

@@ -2,9 +2,9 @@ import json
 import logging
 from sqlalchemy.orm import Session
 
-from database import Resource
+from db import Resource
 from schemas import ResourceRequest
-from file_storage import save_media_file, delete_media_file
+from core.file_storage import save_media_file, delete_media_file
 from services.base_service import BaseService
 
 logger = logging.getLogger(__name__)

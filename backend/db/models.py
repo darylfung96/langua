@@ -1,45 +1,7 @@
-from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Index, Integer, Float, event, func
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session, relationship
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Index, Integer, Float, func
+from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 import uuid
-import os
-import logging
-
-from config import DATABASE_URL, IS_PRODUCTION, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_TIMEOUT
-
-logger = logging.getLogger(__name__)
-
-_engine_kwargs: dict = {}
-if DATABASE_URL.startswith("sqlite"):
-    _engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    _engine_kwargs["pool_size"] = DB_POOL_SIZE
-    _engine_kwargs["max_overflow"] = DB_MAX_OVERFLOW
-    _engine_kwargs["pool_recycle"] = DB_POOL_RECYCLE
-    _engine_kwargs["pool_timeout"] = DB_POOL_TIMEOUT
-    _engine_kwargs["pool_pre_ping"] = True  # Detect stale connections
-
-# SQL query logging: warn if enabled in production, auto-disable by default
-_sql_echo = os.getenv("SQL_ECHO", "false").lower() == "true"
-if IS_PRODUCTION and _sql_echo:
-    logger.warning("SQL_ECHO is enabled in production - this may impact performance and leak sensitive query data")
-_engine_kwargs["echo"] = _sql_echo and not IS_PRODUCTION  # Auto-disable in prod
-
-engine = create_engine(DATABASE_URL, **_engine_kwargs)
-
-# SQLite does not enforce FK constraints by default — enable them on every connection.
-if DATABASE_URL.startswith("sqlite"):
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
-        """Configure SQLite for better concurrency and reliability."""
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")  # Enforce foreign keys
-        cursor.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for better concurrency
-        cursor.execute("PRAGMA synchronous=NORMAL")  # Balance safety vs speed
-        cursor.execute("PRAGMA cache_size=10000")   # 10MB cache
-        cursor.close()
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
@@ -76,7 +38,7 @@ class Story(Base):
     story_content = Column(Text, nullable=False)
     language = Column(String(100), nullable=False)
     vocabulary = Column(Text, nullable=False)  # Stored as JSON string
-    quiz = Column(Text, nullable=True)  # Stored as JSON string
+    quiz = Column(Text, nullable=True)          # Stored as JSON string
     audio_file_path = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -126,7 +88,7 @@ class Visual(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     word = Column(String(255), nullable=False)
     language = Column(String(100), nullable=False)
-    images = Column(Text, nullable=False)  # Stored as JSON string
+    images = Column(Text, nullable=False)       # Stored as JSON string
     prompt = Column(Text, nullable=False)
     explanation = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
@@ -179,24 +141,9 @@ class CSRFToken(Base):
 class OAuthCode(Base):
     """One-time OAuth exchange codes stored in database."""
     __tablename__ = "oauth_codes"
-    __table_args__ = (
-    )
 
     code = Column(String(64), primary_key=True)  # The one-time code (sha256 hash or token)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    jwt_token = Column(Text, nullable=False)  # The JWT to be exchanged
+    jwt_token = Column(Text, nullable=False)      # The JWT to be exchanged
     expires_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
-
-
-def init_db() -> None:
-    """Create all database tables. Called from main.py lifespan on startup."""
-    Base.metadata.create_all(bind=engine)
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()

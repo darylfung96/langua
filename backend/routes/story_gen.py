@@ -14,14 +14,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from config import AI_REQUEST_TIMEOUT
-from security import get_current_user
-from database import User
-from gemini_client import get_gemini_client
-from gemini_tts import generate_tts
-from limiter import limiter
+from core.security import get_current_user
+from db import User
+from clients.gemini import get_gemini_client
+from clients.tts import generate_tts
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 from constants import LANGUAGE_NAMES, DANGEROUS_CHARS_PATTERN
-from sanitization import sanitize_html
+from core.sanitization import sanitize_html
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["story-generation"])

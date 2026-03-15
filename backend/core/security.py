@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-from database import User, get_db
+from db import User, get_db
 
 logger = logging.getLogger(__name__)
 

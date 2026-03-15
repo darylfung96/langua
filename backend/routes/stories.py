@@ -3,10 +3,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
 
-from database import get_db, User
+from db import get_db, User
 from schemas import StoryRequest, StoryDetailResponse, SavedStoryListItem
-from security import get_current_user
-from utils import format_timestamp
+from core.security import get_current_user
+from core.utils import format_timestamp
 from services.story_service import (
     save_story as save_story_db,
     get_all_stories as get_all_stories_db,
@@ -14,7 +14,7 @@ from services.story_service import (
     get_story_by_id as get_story_by_id_db,
     delete_story as delete_story_db,
 )
-from limiter import limiter
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)

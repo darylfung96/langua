@@ -6,6 +6,7 @@ import Header from './components/layout/Header';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './contexts/AuthContext';
+import LoadingSpinner from './components/common/LoadingSpinner';
 
 // Pages — lazily loaded so each route is a separate chunk, reducing initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -18,14 +19,6 @@ const ResourceLearner = lazy(() => import('./pages/ResourceLearner'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Login = lazy(() => import('./pages/Login'));
 
-function PageLoader() {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid var(--accent-primary, #6366f1)', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
-    </div>
-  );
-}
-
 function App() {
   return (
     <Router>
@@ -35,7 +28,7 @@ function App() {
 
           <main className="main-content">
             <ErrorBoundary>
-              <Suspense fallback={<PageLoader />}>
+              <Suspense fallback={<LoadingSpinner />}>
                 <Routes>
                   <Route path="/login" element={<Login />} />
                   <Route element={<ProtectedRoute />}>

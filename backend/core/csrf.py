@@ -11,8 +11,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
 
 from config import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, CSRF_TOKEN_LENGTH, CSRF_MAX_AGE, CSRF_SECRET, IS_PRODUCTION
-from security import AUTH_COOKIE_NAME, decode_token
-from database import get_db, CSRFToken
+from core.security import AUTH_COOKIE_NAME, decode_token
+from db import get_db, CSRFToken
 
 # We no longer use in-memory dict; all tokens are stored in the database
 
@@ -64,7 +64,7 @@ def validate_csrf_token(db, token: str, user_id: str) -> bool:
 
 async def issue_csrf_token(response: Response, user_id: str) -> str:
     """Create a new CSRF token, store in database, set cookie, and return token value."""
-    from database import SessionLocal  # Import here to avoid circular import
+    from db import SessionLocal  # Import here to avoid circular import
 
     token = generate_csrf_token()
     hashed = _hash_token(token)
@@ -100,7 +100,7 @@ async def issue_csrf_token(response: Response, user_id: str) -> str:
 
 async def revoke_csrf_token(user_id: str) -> None:
     """Remove all CSRF tokens for a user (e.g., on logout)."""
-    from database import SessionLocal
+    from db import SessionLocal
 
     db = SessionLocal()
     try:
@@ -183,7 +183,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             )
 
         # Validate token against database
-        from database import SessionLocal
+        from db import SessionLocal
         db = SessionLocal()
         try:
             valid = validate_csrf_token(db, csrf_token, user_id)

@@ -10,7 +10,7 @@ from typing import Generic, List, Optional, Type, TypeVar
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from database import Base
+from db import Base
 
 logger = logging.getLogger(__name__)
 

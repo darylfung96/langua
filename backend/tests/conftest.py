@@ -8,9 +8,9 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from database import Base, get_db
+from db import Base, get_db
 from main import app
-from limiter import limiter
+from core.limiter import limiter
 
 # ---------------------------------------------------------------------------
 # In-memory SQLite database — isolated per test session

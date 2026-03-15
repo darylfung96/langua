@@ -11,9 +11,9 @@ from faster_whisper import WhisperModel
 import torch
 
 from config import WHISPER_MODEL_NAME, WHISPER_MAX_UPLOAD_SIZE, TEMP_DIR, TRANSCRIBE_TIMEOUT
-from database import User
-from security import get_current_user
-from limiter import limiter
+from db import User
+from core.security import get_current_user
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)

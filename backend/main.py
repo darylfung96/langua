@@ -21,11 +21,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import CORS_ORIGINS, IS_PRODUCTION, LOG_LEVEL, LOG_FORMAT, SERVER_SSL_CERT_FILE, SERVER_SSL_KEY_FILE, AUTO_INIT_DB
-from database import User, get_db, SessionLocal, init_db
-from file_storage import UPLOADS_DIR, get_media_file_path
-from limiter import limiter
-from security import decode_token, AUTH_COOKIE_NAME, get_current_user
-from csrf import CSRFMiddleware, issue_csrf_token
+from db import User, get_db, SessionLocal, init_db
+from core.file_storage import UPLOADS_DIR, get_media_file_path
+from core.limiter import limiter
+from core.security import decode_token, AUTH_COOKIE_NAME, get_current_user
+from core.csrf import CSRFMiddleware, issue_csrf_token
 from routes.auth import router as auth_router
 from routes.stories import router as stories_router
 from routes.lyrics import router as lyrics_router

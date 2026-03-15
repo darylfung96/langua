@@ -11,7 +11,7 @@ from alembic import context
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import DATABASE_URL
-from database import Base  # noqa: F401 — ensures all models are registered
+from db import Base  # noqa: F401 — ensures all models are registered
 import database  # noqa: F401
 
 config = context.config

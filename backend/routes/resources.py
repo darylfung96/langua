@@ -6,10 +6,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from database import get_db, User
+from db import get_db, User
 from schemas import ResourceRequest, ResourceDetailResponse, SavedResourceListItem
-from security import get_current_user
-from utils import format_timestamp
+from core.security import get_current_user
+from core.utils import format_timestamp
 from services.resource_service import (
     save_resource as save_resource_db,
     get_all_resources as get_all_resources_db,
@@ -17,8 +17,8 @@ from services.resource_service import (
     get_resource_by_id as get_resource_by_id_db,
     delete_resource as delete_resource_db,
 )
-from file_storage import get_media_file_path, validate_media_file
-from limiter import limiter
+from core.file_storage import get_media_file_path, validate_media_file
+from core.limiter import limiter
 from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["resources"])

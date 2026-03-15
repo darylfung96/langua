@@ -28,9 +28,9 @@ from config import (
     JWT_SECRET_KEY,
     JWT_ALGORITHM,
 )
-from database import User, get_db, OAuthCode
+from db import User, get_db, OAuthCode
 from schemas import UserRegister, Token, UserResponse
-from security import (
+from core.security import (
     AUTH_COOKIE_NAME,
     hash_password,
     verify_password,
@@ -38,8 +38,8 @@ from security import (
     decode_token,
     get_current_user,
 )
-from limiter import limiter
-from csrf import issue_csrf_token, revoke_csrf_token
+from core.limiter import limiter
+from core.csrf import issue_csrf_token, revoke_csrf_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])

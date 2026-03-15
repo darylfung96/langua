@@ -92,7 +92,6 @@ export async function apiFetch(
   };
 
   let lastError: Error | null = null;
-  let lastStatus: number = 0;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -105,7 +104,6 @@ export async function apiFetch(
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        lastStatus = response.status;
         const error = new ApiError(response.status, body.detail || response.statusText);
 
         if (isRetryable(method, response.status) && attempt < MAX_RETRIES) {
@@ -116,6 +114,7 @@ export async function apiFetch(
         throw error;
       }
 
+      clearTimeout(timeoutId); // Prevent abort from firing after a successful response
       return response;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {

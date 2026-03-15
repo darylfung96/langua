@@ -2,7 +2,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 
-from database import Visual
+from db import Visual
 from schemas import VisualRequest
 from services.base_service import BaseService
 

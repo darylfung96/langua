@@ -2,7 +2,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 
-from database import Lyric
+from db import Lyric
 from schemas import LyricRequest
 from services.base_service import BaseService
 
